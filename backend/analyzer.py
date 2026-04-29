@@ -21,7 +21,15 @@ import imagehash
 import numpy as np
 from PIL import Image
 
-from models import AnalysisJob, ClipReview, ClipScore, JobStatus
+from models import (
+    AnalysisJob,
+    ClipReview,
+    ClipScore,
+    CullPolicy,
+    CullReason,
+    CullStats,
+    JobStatus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -242,6 +250,120 @@ def compute_dhash(frame: np.ndarray) -> imagehash.ImageHash:
     return imagehash.dhash(pil_img)
 
 
+# ─────────────────────────── Auto-cull pass ────────────────────────────────
+#
+# This is the actual culling. Without this, every clip starts at approved=False
+# and the user has to click through 500+ items by hand. With it, the analyzer
+# decides — clips above quality thresholds approve automatically, clearly bad
+# ones get rejected with a reason, and within each group of duplicates only
+# the best take survives.
+#
+# Reasons (highest priority first):
+#   too_short      → duration < min_duration_sec (likely accidental hits)
+#   bad_exposure   → exposure_ok == False
+#   too_shaky      → shake_score > shake_threshold
+#   too_blurry     → blur_score > blur_threshold
+#   duplicate      → another clip is the "best take" in its dedup group
+
+def _quality_score(clip: ClipReview) -> float:
+    """
+    Lower = better. Used to pick the best take inside a duplicate group.
+    Combines shake + blur + a small penalty for short clips.
+    """
+    s = clip.scores.shake_score + clip.scores.blur_score
+    if clip.scores.duration_sec < 3.0:
+        s += 0.1  # mild penalty for very short clips
+    return s
+
+
+def apply_cull(clips: List[ClipReview], policy: CullPolicy) -> CullStats:
+    """
+    Mutate `clips` in place: set `approved` and `cull_reason` per the policy.
+    Returns aggregate stats for the run.
+
+    Order of decisions per clip (first-match wins):
+      1. duration < min_duration_sec → too_short
+      2. exposure not ok (when require_exposure_ok) → bad_exposure
+      3. shake_score > threshold → too_shaky
+      4. blur_score > threshold → too_blurry
+      5. duplicate of another clip's best-take winner → duplicate
+      6. otherwise → approved
+    """
+    stats = CullStats(total=len(clips))
+
+    if not policy.enabled:
+        # Caller wants us to skip — leave whatever was there.
+        for clip in clips:
+            if clip.cull_reason is None:
+                clip.cull_reason = CullReason.approved.value
+            if clip.cull_reason == CullReason.approved.value:
+                clip.approved = True
+                stats.approved += 1
+        return stats
+
+    # ── Pass 1: per-clip quality gates ────────────────────────────────────
+    for clip in clips:
+        reason: Optional[CullReason] = None
+
+        if clip.scores.duration_sec < policy.min_duration_sec:
+            reason = CullReason.too_short
+        elif policy.require_exposure_ok and not clip.scores.exposure_ok:
+            reason = CullReason.bad_exposure
+        elif clip.scores.shake_score > policy.shake_threshold:
+            reason = CullReason.too_shaky
+        elif clip.scores.blur_score > policy.blur_threshold:
+            reason = CullReason.too_blurry
+
+        if reason is not None:
+            clip.approved = False
+            clip.cull_reason = reason.value
+        else:
+            # Tentatively approve; duplicate pass below may revoke.
+            clip.approved = True
+            clip.cull_reason = CullReason.approved.value
+
+    # ── Pass 2: duplicate groups — keep best take only ────────────────────
+    if policy.reject_duplicates:
+        # A duplicate group is the original (None duplicate_of) plus all
+        # clips whose duplicate_of points at the same original.
+        groups: Dict[str, List[ClipReview]] = {}
+        approved_by_id = {c.clip_id: c for c in clips if c.approved}
+        for clip in clips:
+            if not clip.approved:
+                continue
+            head_id = clip.scores.duplicate_of or clip.clip_id
+            groups.setdefault(head_id, []).append(clip)
+
+        for head_id, group in groups.items():
+            if len(group) <= 1:
+                continue
+            # Best = lowest quality_score (lowest combined shake+blur).
+            best = min(group, key=_quality_score)
+            for clip in group:
+                if clip is best:
+                    continue
+                clip.approved = False
+                clip.cull_reason = CullReason.duplicate.value
+
+    # ── Tally stats ────────────────────────────────────────────────────────
+    for clip in clips:
+        r = clip.cull_reason
+        if r == CullReason.approved.value:
+            stats.approved += 1
+        elif r == CullReason.too_short.value:
+            stats.rejected_short += 1
+        elif r == CullReason.too_shaky.value:
+            stats.rejected_shaky += 1
+        elif r == CullReason.too_blurry.value:
+            stats.rejected_blurry += 1
+        elif r == CullReason.bad_exposure.value:
+            stats.rejected_exposure += 1
+        elif r == CullReason.duplicate.value:
+            stats.rejected_duplicate += 1
+
+    return stats
+
+
 def find_duplicates(
     clip_ids: List[str],
     hashes: Dict[str, imagehash.ImageHash],
@@ -348,6 +470,7 @@ def analyze_folder(
     folder_path: str,
     jobs_store: Dict[str, AnalysisJob],
     included_files: Optional[List[str]] = None,
+    cull_policy: Optional[CullPolicy] = None,
 ) -> None:
     """
     Entry point called from the FastAPI background thread.
@@ -446,11 +569,35 @@ def analyze_folder(
                 dup_count += 1
         logger.info("Found %d duplicate(s)", dup_count)
 
+        # ── Auto-cull pass ────────────────────────────────────────────────
+        # This is what turns "I have scores" into "I have a curated edit".
+        # Apply the policy now and persist stats so the UI can show what
+        # got rejected and why.
+        policy = cull_policy or job.cull_policy or CullPolicy()
+        logger.info(
+            "Auto-culling: shake>%.2f, blur>%.2f, dur<%.1fs, dups=%s",
+            policy.shake_threshold, policy.blur_threshold,
+            policy.min_duration_sec, policy.reject_duplicates,
+        )
+        stats = apply_cull(clip_results, policy)
+        logger.info(
+            "Cull result — total=%d approved=%d rejected: short=%d shaky=%d "
+            "blurry=%d exposure=%d dup=%d",
+            stats.total, stats.approved, stats.rejected_short,
+            stats.rejected_shaky, stats.rejected_blurry,
+            stats.rejected_exposure, stats.rejected_duplicate,
+        )
+
         job.clips = clip_results
+        job.cull_policy = policy
+        job.cull_stats = stats
         job.status = JobStatus.done
         job.progress = 100.0
         jobs_store[job_id] = job
-        logger.info("Done — %d clip(s) processed", len(clip_results))
+        logger.info(
+            "Done — %d clip(s) processed; %d approved, %d rejected",
+            len(clip_results), stats.approved, stats.total - stats.approved,
+        )
 
     except Exception as exc:  # noqa: BLE001
         logger.exception("Job %s failed: %s", job_id, exc)

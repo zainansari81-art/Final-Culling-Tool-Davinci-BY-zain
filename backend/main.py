@@ -22,16 +22,19 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 
-from analyzer import SUPPORTED_EXTENSIONS, analyze_folder
+from analyzer import SUPPORTED_EXTENSIONS, analyze_folder, apply_cull
 from fcpxml_export import export_to_fcpxml
 from models import (
     AnalysisJob,
     ClipReview,
     CreateJobRequest,
+    CullPolicy,
+    CullStats,
     FcpxmlExportRequest,
     FsEntry,
     FsListResponse,
     JobStatus,
+    RecullRequest,
     ResolveExportRequest,
     UpdateClipRequest,
 )
@@ -84,7 +87,12 @@ class JobLogHandler(logging.Handler):
         job_logs[self.job_id].append(line)
 
 
-def _run_job(job_id: str, folder_path: str, included_files: List[str] | None) -> None:
+def _run_job(
+    job_id: str,
+    folder_path: str,
+    included_files: List[str] | None,
+    cull_policy: CullPolicy | None = None,
+) -> None:
     """Wrapper that attaches a per-job log handler before running analysis."""
     handler = JobLogHandler(job_id)
     handler.setLevel(logging.INFO)
@@ -94,7 +102,7 @@ def _run_job(job_id: str, folder_path: str, included_files: List[str] | None) ->
         f"{datetime.now().strftime('%H:%M:%S')} I Job started for {folder_path}"
     )
     try:
-        analyze_folder(job_id, folder_path, jobs, included_files)
+        analyze_folder(job_id, folder_path, jobs, included_files, cull_policy)
     finally:
         analyzer_logger.removeHandler(handler)
         job_logs[job_id].append(
@@ -143,20 +151,23 @@ def create_job(body: CreateJobRequest) -> AnalysisJob:
             detail=f"Path is not a directory: {body.folder_path}",
         )
 
+    policy = body.cull_policy or CullPolicy()
     job = AnalysisJob(
         id=str(uuid.uuid4()),
         folder_path=str(folder.resolve()),
+        cull_policy=policy,
         created_at=datetime.utcnow(),
     )
     jobs[job.id] = job
 
     _executor.submit(
-        _run_job, job.id, job.folder_path, body.included_files,
+        _run_job, job.id, job.folder_path, body.included_files, policy,
     )
     logger.info(
-        "Created job %s for %s (included_files=%s)",
+        "Created job %s for %s (included_files=%s, cull=%s)",
         job.id, job.folder_path,
         len(body.included_files) if body.included_files else "all",
+        "on" if policy.enabled else "off",
     )
     return job
 
@@ -277,11 +288,36 @@ def update_clip(
     return clip
 
 
-# ─────────────────────────── Bulk auto-approve ───────────────────────────────
+# ─────────────────────────── Re-cull (tune thresholds live) ─────────────────
+
+@app.post(
+    "/jobs/{job_id}/cull",
+    response_model=CullStats,
+    summary="Re-run the auto-cull pass with new thresholds (no re-analysis)",
+)
+def recull(job_id: str, body: RecullRequest) -> CullStats:
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not job.clips:
+        raise HTTPException(status_code=400, detail="Job has no clips yet")
+    stats = apply_cull(job.clips, body.cull_policy)
+    job.cull_policy = body.cull_policy
+    job.cull_stats = stats
+    jobs[job_id] = job
+    logger.info(
+        "Re-cull job=%s approved=%d rejected: short=%d shaky=%d blurry=%d exp=%d dup=%d",
+        job_id, stats.approved, stats.rejected_short, stats.rejected_shaky,
+        stats.rejected_blurry, stats.rejected_exposure, stats.rejected_duplicate,
+    )
+    return stats
+
+
+# ─────────────────────────── Bulk auto-approve (legacy) ─────────────────────
 
 @app.post(
     "/jobs/{job_id}/approve-all",
-    summary="Auto-approve good clips, reject shaky/blurry ones",
+    summary="Approve every clip (legacy — prefer /jobs/{id}/cull)",
 )
 def approve_all(job_id: str) -> Dict[str, Any]:
     job = jobs.get(job_id)

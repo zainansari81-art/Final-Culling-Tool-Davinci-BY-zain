@@ -40,7 +40,39 @@ class ClipReview(BaseModel):
     scores: ClipScore
     suggested_segment: str = "Backup"   # machine suggestion
     approved: bool = False
+    cull_reason: Optional[str] = None    # populated by the auto-cull pass; None = approved
     segment_label: str = "Backup"       # human-confirmed label
+
+
+class CullPolicy(BaseModel):
+    """Thresholds that drive the auto-cull pass after analysis."""
+    enabled: bool = True
+    shake_threshold: float = 0.70   # shake_score above this → reject
+    blur_threshold: float = 0.70    # blur_score above this → reject
+    min_duration_sec: float = 1.5   # clips shorter → reject (accidental hits)
+    require_exposure_ok: bool = True
+    reject_duplicates: bool = True  # keep only the best in each duplicate group
+
+
+class CullReason(str, Enum):
+    """Why a clip was auto-rejected. None = approved."""
+    approved = "approved"
+    too_short = "too_short"
+    too_shaky = "too_shaky"
+    too_blurry = "too_blurry"
+    bad_exposure = "bad_exposure"
+    duplicate = "duplicate"
+
+
+class CullStats(BaseModel):
+    """Summary of the auto-cull pass."""
+    total: int = 0
+    approved: int = 0
+    rejected_short: int = 0
+    rejected_shaky: int = 0
+    rejected_blurry: int = 0
+    rejected_exposure: int = 0
+    rejected_duplicate: int = 0
 
 
 class AnalysisJob(BaseModel):
@@ -50,6 +82,8 @@ class AnalysisJob(BaseModel):
     status: JobStatus = JobStatus.queued
     progress: float = Field(default=0.0, ge=0.0, le=100.0)
     clips: List[ClipReview] = Field(default_factory=list)
+    cull_policy: CullPolicy = Field(default_factory=CullPolicy)
+    cull_stats: Optional[CullStats] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     error: Optional[str] = None
 
@@ -57,6 +91,12 @@ class AnalysisJob(BaseModel):
 class CreateJobRequest(BaseModel):
     folder_path: str
     included_files: Optional[List[str]] = None  # absolute paths; if set, only these are analyzed
+    cull_policy: Optional[CullPolicy] = None    # if None, server defaults are used
+
+
+class RecullRequest(BaseModel):
+    """POST /jobs/{id}/cull — re-run the cull pass with new thresholds."""
+    cull_policy: CullPolicy
 
 
 class FsEntry(BaseModel):
