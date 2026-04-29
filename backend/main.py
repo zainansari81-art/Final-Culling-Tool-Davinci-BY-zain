@@ -313,26 +313,48 @@ def recull(job_id: str, body: RecullRequest) -> CullStats:
     return stats
 
 
-# ─────────────────────────── Bulk auto-approve (legacy) ─────────────────────
+# ─────────────────────────── Bulk approve / reject ──────────────────────────
 
 @app.post(
     "/jobs/{job_id}/approve-all",
-    summary="Approve every clip (legacy — prefer /jobs/{id}/cull)",
+    summary="Approve every clip in the job (hard override). Use /jobs/{id}/cull "
+            "with a CullPolicy if you want threshold-driven behavior.",
 )
 def approve_all(job_id: str) -> Dict[str, Any]:
+    """
+    Hard approve — sets every clip to approved=True regardless of scores.
+
+    Replaces the previous behavior that silently dropped any clip with
+    shake_score>=0.4 or blur_score>=0.4. Those thresholds were way too
+    tight for handheld wedding footage (where 0.3-0.5 is normal),
+    causing 'approve all' to actually reject most clips. The button
+    should literally approve all when the user clicks it; threshold-
+    driven behavior is now /jobs/{id}/cull with an explicit policy.
+    """
     job = jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    approved = rejected = 0
     for clip in job.clips:
-        good = clip.scores.shake_score < 0.4 and clip.scores.blur_score < 0.4 and clip.scores.exposure_ok
-        clip.approved = good
-        if good:
-            approved += 1
-        else:
-            rejected += 1
+        clip.approved = True
+        clip.cull_reason = "approved"
     jobs[job_id] = job
-    return {"approved": approved, "rejected": rejected, "total": len(job.clips)}
+    logger.info("approve-all job=%s → %d clips set to approved", job_id, len(job.clips))
+    return {"approved": len(job.clips), "rejected": 0, "total": len(job.clips)}
+
+
+@app.post(
+    "/jobs/{job_id}/reject-all",
+    summary="Reject every clip in the job (clean slate before manual selection)",
+)
+def reject_all(job_id: str) -> Dict[str, Any]:
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    for clip in job.clips:
+        clip.approved = False
+        clip.cull_reason = None
+    jobs[job_id] = job
+    return {"approved": 0, "rejected": len(job.clips), "total": len(job.clips)}
 
 
 # ─────────────────────────── Export — Resolve ────────────────────────────────
