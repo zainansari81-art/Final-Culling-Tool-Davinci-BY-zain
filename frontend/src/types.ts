@@ -28,6 +28,7 @@ export interface AnalysisJob {
 
 export interface CreateJobRequest {
   folder_path: string
+  included_files?: string[]
 }
 
 export interface UpdateClipRequest {

@@ -49,8 +49,12 @@ DUPLICATE_HASH_DISTANCE = 8
 # Thumbnail output root (per-job sub-dirs created on demand)
 THUMBNAILS_ROOT = Path("/tmp/culling-thumbs")
 
-# Parallelism — keep it modest so disk I/O doesn't thrash on an HDD
-MAX_WORKERS = 4
+# Parallelism — keep modest so HDD I/O doesn't thrash and 8GB Macs don't swap
+MAX_WORKERS = 2
+
+# Toggle the heavy second-pass scene detection. Off by default — saves ~30–40%
+# wall time on M1 Air / 8GB; scene_count isn't used to drive any decision.
+ENABLE_SCENE_DETECTION = False
 
 
 # ─────────────────────────── Segment classification ─────────────────────────
@@ -296,7 +300,7 @@ def analyze_single_clip(file_path: str, job_id: str) -> ClipReview:
     blur_score = compute_blur_score(frames)
     shake_score = compute_shake_score(frames)
     exposure_ok = compute_exposure_ok(frames)
-    scene_count = count_scenes(file_path)
+    scene_count = count_scenes(file_path) if ENABLE_SCENE_DETECTION else 1
     suggested_segment = classify_segment(file_path)
 
     # Middle keyframe → thumbnail
@@ -339,17 +343,34 @@ def collect_video_files(folder_path: str) -> List[str]:
     return results
 
 
-def analyze_folder(job_id: str, folder_path: str, jobs_store: Dict[str, AnalysisJob]) -> None:
+def analyze_folder(
+    job_id: str,
+    folder_path: str,
+    jobs_store: Dict[str, AnalysisJob],
+    included_files: Optional[List[str]] = None,
+) -> None:
     """
     Entry point called from the FastAPI background thread.
     Mutates the AnalysisJob in jobs_store throughout processing.
+
+    If `included_files` is provided, only those absolute paths are analyzed
+    (filtered to ones living under `folder_path` and matching supported types).
     """
     job = jobs_store[job_id]
     job.status = JobStatus.running
     jobs_store[job_id] = job
 
     try:
-        video_files = collect_video_files(folder_path)
+        if included_files:
+            folder_resolved = str(Path(folder_path).resolve())
+            video_files = [
+                fp for fp in included_files
+                if Path(fp).suffix.lower() in SUPPORTED_EXTENSIONS
+                and str(Path(fp).resolve()).startswith(folder_resolved)
+                and Path(fp).is_file()
+            ]
+        else:
+            video_files = collect_video_files(folder_path)
         total = len(video_files)
 
         if total == 0:
@@ -390,11 +411,18 @@ def analyze_folder(job_id: str, folder_path: str, jobs_store: Dict[str, Analysis
                     )
                 finally:
                     completed += 1
-                    job.progress = round((completed / total) * 100.0, 1)
+                    pct = round((completed / total) * 95.0, 1)  # leave 5% for dup pass
+                    job.progress = pct
                     jobs_store[job_id] = job
+                    logger.info(
+                        "Done %d/%d (%.1f%%) — %s",
+                        completed, total, pct, Path(fp).name,
+                    )
 
         # ── Duplicate detection pass ──────────────────────────────────────
-        logger.info("Running duplicate detection for job %s …", job_id)
+        logger.info("Running duplicate detection across %d clips…", len(clip_results))
+        job.progress = 96.0
+        jobs_store[job_id] = job
         representative_hashes: Dict[str, imagehash.ImageHash] = {}
         for clip in clip_results:
             try:
@@ -410,16 +438,19 @@ def analyze_folder(job_id: str, folder_path: str, jobs_store: Dict[str, Analysis
             [c.clip_id for c in clip_results],
             representative_hashes,
         )
+        dup_count = 0
         for clip in clip_results:
             dup_target = dup_map.get(clip.clip_id)
             if dup_target is not None:
                 clip.scores.duplicate_of = dup_target
+                dup_count += 1
+        logger.info("Found %d duplicate(s)", dup_count)
 
         job.clips = clip_results
         job.status = JobStatus.done
         job.progress = 100.0
         jobs_store[job_id] = job
-        logger.info("Job %s done: %d clips processed", job_id, len(clip_results))
+        logger.info("Done — %d clip(s) processed", len(clip_results))
 
     except Exception as exc:  # noqa: BLE001
         logger.exception("Job %s failed: %s", job_id, exc)

@@ -1,92 +1,102 @@
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
 
 :root {
-  --bg-0: #0d0d0d;
-  --bg-1: #161616;
-  --bg-2: #1e1e1e;
-  --bg-3: #272727;
-  --bg-4: #333333;
-  --border: #3a3a3a;
-  --border-hover: #555555;
-  --text-primary: #e8e8e8;
-  --text-secondary: #999999;
-  --text-muted: #666666;
-  --accent: #4f8ef7;
-  --accent-dim: #1e3a6e;
-  --green: #3cb371;
-  --green-dim: #1a3d26;
-  --red: #e05252;
-  --red-dim: #3d1a1a;
-  --orange: #e08040;
-  --orange-dim: #3d2410;
-  --yellow: #d4b44a;
-  --yellow-dim: #3d2e10;
+  --background: #0a0a0b;
+  --foreground: #ededed;
+  --card: #131316;
+  --card-foreground: #ededed;
+  --popover: #18181c;
+  --popover-foreground: #ededed;
+  --primary: #ededed;
+  --primary-foreground: #0a0a0b;
+  --secondary: #1f1f24;
+  --secondary-foreground: #ededed;
+  --muted: #1a1a1d;
+  --muted-foreground: #8a8a93;
+  --accent: #1f1f24;
+  --accent-foreground: #ededed;
+  --destructive: #f15858;
+  --destructive-foreground: #ffffff;
+  --border: #26262c;
+  --input: #1f1f24;
+  --ring: #4f8ef7;
+  --success: #22c55e;
+  --success-foreground: #ffffff;
+  --warning: #f59e0b;
+  --info: #4f8ef7;
+  --radius: 0.625rem;
 }
 
-html, body {
-  height: 100%;
-  background: var(--bg-0);
-  color: var(--text-primary);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  font-size: 13px;
-  line-height: 1.4;
-  color-scheme: dark;
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, sans-serif;
 }
 
-#root {
-  height: 100%;
-  min-height: 100svh;
-}
-
-a {
-  color: var(--accent);
-  text-decoration: none;
-}
-
-a:hover {
-  text-decoration: underline;
-}
-
-button {
-  cursor: pointer;
-  font-family: inherit;
-  font-size: inherit;
-}
-
-input, select, textarea {
-  font-family: inherit;
-  font-size: inherit;
-  background: var(--bg-3);
-  color: var(--text-primary);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 6px 10px;
-  outline: none;
-}
-
-input:focus, select:focus, textarea:focus {
-  border-color: var(--accent);
-}
-
-select option {
-  background: var(--bg-3);
-}
-
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: var(--bg-1);
-}
-::-webkit-scrollbar-thumb {
-  background: var(--bg-4);
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #555;
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+  html, body {
+    height: 100%;
+    background: var(--background);
+    color: var(--foreground);
+    color-scheme: dark;
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  body {
+    font-family: var(--font-sans);
+  }
+  #root {
+    min-height: 100svh;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--ring) 35%, transparent);
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border: 2px solid var(--background);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--border) 50%, var(--muted-foreground));
+  }
 }

@@ -56,6 +56,22 @@ class AnalysisJob(BaseModel):
 
 class CreateJobRequest(BaseModel):
     folder_path: str
+    included_files: Optional[List[str]] = None  # absolute paths; if set, only these are analyzed
+
+
+class FsEntry(BaseModel):
+    name: str
+    path: str
+    is_dir: bool
+    is_video: bool = False
+    size_bytes: int = 0
+
+
+class FsListResponse(BaseModel):
+    path: str
+    parent: Optional[str] = None
+    entries: List[FsEntry] = Field(default_factory=list)
+    video_count: int = 0
 
 
 class UpdateClipRequest(BaseModel):

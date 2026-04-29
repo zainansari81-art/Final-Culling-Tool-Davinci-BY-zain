@@ -1,11 +1,26 @@
 import { useState } from 'react'
+import { Check, Download, FileVideo, Loader2 } from 'lucide-react'
 import { api } from '../api'
 import type { AnalysisJob } from '../types'
-import './ExportModal.css'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { cn } from '@/lib/utils'
 
 function defaultFcpxmlPath(): string {
   const date = new Date().toISOString().slice(0, 10)
-  return `${(globalThis as unknown as { process?: { env?: Record<string, string> } })?.process?.env?.HOME ?? '~'}/Desktop/wedding-${date}.fcpxml`
+  const home =
+    (globalThis as unknown as { process?: { env?: Record<string, string> } })
+      ?.process?.env?.HOME ?? '~'
+  return `${home}/Desktop/wedding-${date}.fcpxml`
 }
 
 interface Props {
@@ -33,98 +48,153 @@ export default function ExportModal({ job, onClose }: Props) {
       }
       setStatus('success')
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Export failed'
-      setErrorMsg(msg)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const detail = (err as any)?.response?.data?.detail
+      const msg = detail ?? (err instanceof Error ? err.message : 'Export failed')
+      setErrorMsg(String(msg))
       setStatus('error')
     }
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal__header">
-          <h2>Export Project</h2>
-          <button className="modal__close" onClick={onClose}>
-            &#x2715;
-          </button>
-        </div>
-
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
         {status === 'success' ? (
-          <div className="modal__success">
-            <div className="modal__success-icon">&#x2713;</div>
-            <p>
-              {exportType === 'resolve'
-                ? 'Project created in DaVinci Resolve'
-                : 'FCPXML file exported successfully'}
-            </p>
-            <p className="modal__success-hint">
-              {exportType === 'resolve'
-                ? 'Open DaVinci Resolve to find your new project.'
-                : 'Import the .fcpxml file in Final Cut Pro.'}
-            </p>
-            <button className="btn btn--primary" onClick={onClose}>
-              Close
-            </button>
+          <div className="flex flex-col items-center gap-3 py-6 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-success/15 text-success">
+              <Check className="h-6 w-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold">
+                {exportType === 'resolve'
+                  ? 'Project created in DaVinci Resolve'
+                  : 'FCPXML exported'}
+              </h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {exportType === 'resolve'
+                  ? 'Open DaVinci Resolve to find your new project.'
+                  : 'Import the .fcpxml file in Final Cut Pro.'}
+              </p>
+            </div>
+            <Button onClick={onClose} className="mt-2 w-full">
+              Done
+            </Button>
           </div>
         ) : (
           <>
-            <div className="modal__body">
-              <label className="form-label">
-                Project name
-                <input
-                  type="text"
+            <DialogHeader>
+              <DialogTitle>Export project</DialogTitle>
+              <DialogDescription>
+                Send approved clips to your editor.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              <div className="grid gap-2">
+                <Label htmlFor="project-name">Project name</Label>
+                <Input
+                  id="project-name"
                   value={projectName}
                   onChange={(e) => setProjectName(e.target.value)}
-                  className="form-input"
                   disabled={status === 'loading'}
                   autoFocus
                 />
-              </label>
+              </div>
 
-              <div>
-                <div className="form-label-text">Export format</div>
-                <div className="export-toggle">
-                  <button
-                    className={`export-toggle__btn${exportType === 'resolve' ? ' export-toggle__btn--active' : ''}`}
+              <div className="grid gap-2">
+                <Label>Format</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <FormatChoice
+                    selected={exportType === 'resolve'}
+                    disabled={status === 'loading'}
                     onClick={() => setExportType('resolve')}
+                    title="DaVinci Resolve"
+                    sub="Direct to a new project"
+                  />
+                  <FormatChoice
+                    selected={exportType === 'fcpxml'}
                     disabled={status === 'loading'}
-                  >
-                    DaVinci Resolve
-                  </button>
-                  <button
-                    className={`export-toggle__btn${exportType === 'fcpxml' ? ' export-toggle__btn--active' : ''}`}
                     onClick={() => setExportType('fcpxml')}
-                    disabled={status === 'loading'}
-                  >
-                    FCPXML
-                  </button>
+                    title="FCPXML"
+                    sub="For any NLE"
+                  />
                 </div>
               </div>
 
               {status === 'error' && (
-                <div className="modal__error">{errorMsg}</div>
+                <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  {errorMsg}
+                </p>
               )}
             </div>
 
-            <div className="modal__footer">
-              <button
-                className="btn btn--ghost"
+            <DialogFooter>
+              <Button
+                variant="ghost"
                 onClick={onClose}
                 disabled={status === 'loading'}
               >
                 Cancel
-              </button>
-              <button
-                className="btn btn--primary"
+              </Button>
+              <Button
                 onClick={handleExport}
                 disabled={status === 'loading' || !projectName.trim()}
               >
-                {status === 'loading' ? 'Exporting…' : 'Export'}
-              </button>
-            </div>
+                {status === 'loading' ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Exporting…
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-4 w-4" />
+                    Export
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
           </>
         )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function FormatChoice({
+  selected,
+  disabled,
+  onClick,
+  title,
+  sub,
+}: {
+  selected: boolean
+  disabled: boolean
+  onClick: () => void
+  title: string
+  sub: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        'flex flex-col items-start gap-1 rounded-lg border bg-card px-3 py-2.5 text-left transition-colors disabled:opacity-50',
+        selected
+          ? 'border-foreground/40 bg-accent'
+          : 'border-border/70 hover:border-border hover:bg-accent/50',
+      )}
+    >
+      <div className="flex w-full items-center justify-between">
+        <span className="text-sm font-medium">{title}</span>
+        <FileVideo
+          className={cn(
+            'h-4 w-4',
+            selected ? 'text-foreground' : 'text-muted-foreground',
+          )}
+        />
       </div>
-    </div>
+      <span className="text-xs text-muted-foreground">{sub}</span>
+    </button>
   )
 }

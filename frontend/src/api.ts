@@ -34,7 +34,25 @@ function toJob(raw: any): AnalysisJob {
   return { ...raw, clips: (raw.clips ?? []).map(toClipResult) }
 }
 
+export interface FsEntry {
+  name: string
+  path: string
+  is_dir: boolean
+  is_video: boolean
+  size_bytes: number
+}
+
+export interface FsListResponse {
+  path: string
+  parent: string | null
+  entries: FsEntry[]
+  video_count: number
+}
+
 export const api = {
+  fsList: (path?: string): Promise<FsListResponse> =>
+    client.get('/fs/list', { params: path ? { path } : {} }).then((r) => r.data),
+
   createJob: (data: CreateJobRequest): Promise<AnalysisJob> =>
     client.post('/jobs', data).then((r) => toJob(r.data)),
 
@@ -47,6 +65,9 @@ export const api = {
 
   getProgress: (id: string): Promise<{ progress: number; status: string }> =>
     client.get(`/jobs/${id}/progress`).then((r) => r.data),
+
+  getLogs: (id: string, since: number): Promise<{ lines: string[]; total: number }> =>
+    client.get(`/jobs/${id}/logs`, { params: { since } }).then((r) => r.data),
 
   patchClip: (jobId: string, clipId: string, patch: UpdateClipRequest): Promise<ClipResult> =>
     client
@@ -68,4 +89,7 @@ export const api = {
 
   thumbnailUrl: (jobId: string, clipId: string): string =>
     `${BASE_URL}/thumbnails/${jobId}/${clipId}`,
+
+  clipStreamUrl: (jobId: string, clipId: string): string =>
+    `${BASE_URL}/clips/${jobId}/${clipId}`,
 }
