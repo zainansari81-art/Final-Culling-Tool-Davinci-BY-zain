@@ -295,6 +295,116 @@ def _frame_blur(gray: np.ndarray) -> float:
 def _frame_brightness(gray: np.ndarray) -> float:
     return float(gray.mean())
 
+
+# ─────────────────────────── Face detection ────────────────────────────────
+# OpenCV ships a Haar cascade for frontal faces. Loaded lazily and cached.
+# Fast enough to run on every sampled frame in deep mode (~1-3ms per frame
+# on M1). Used to flag segments containing recognizable subjects, which
+# distinguishes a hero shot from filler footage of decor or floors.
+
+_face_cascade = None
+
+def _get_face_cascade() -> Optional["cv2.CascadeClassifier"]:
+    global _face_cascade
+    if _face_cascade is None:
+        try:
+            cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+            _face_cascade = cv2.CascadeClassifier(cascade_path)
+            if _face_cascade.empty():
+                logger.warning("Face cascade loaded empty — face detection disabled")
+                _face_cascade = None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Face cascade unavailable: %s", exc)
+            _face_cascade = None
+    return _face_cascade
+
+
+def _detect_faces(gray: np.ndarray) -> int:
+    """Returns the number of faces detected. 0 if none or cascade unavailable."""
+    cascade = _get_face_cascade()
+    if cascade is None:
+        return 0
+    try:
+        # Downsample to ~640px wide for speed; faces still detect reliably
+        h, w = gray.shape
+        if w > 640:
+            scale = 640.0 / w
+            gray = cv2.resize(gray, (640, int(h * scale)))
+        faces = cascade.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=4, minSize=(40, 40))
+        return len(faces)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _frame_richness(frame_bgr: np.ndarray) -> Tuple[float, float]:
+    """
+    Returns (saturation_mean_norm, contrast_norm) for a BGR frame.
+    Used to recognize quality B-roll (decor, rings, drone, lighting) where
+    a face cascade returns nothing but the shot is visually rich.
+
+    saturation: HSV S channel mean / 255 (0=grey, 1=very saturated)
+    contrast:   grayscale stddev / 64 (clamped) — more spread = more interesting
+    """
+    hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+    sat_mean = float(hsv[..., 1].mean()) / 255.0
+    gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+    contrast = min(float(gray.std()) / 64.0, 1.0)
+    return sat_mean, contrast
+
+
+def _highlight_quality(
+    avg_blur_var: float,        # raw Laplacian variance (higher = sharper)
+    avg_flow: float,            # raw mean optical-flow magnitude (lower = stabler)
+    avg_bright: float,          # raw mean brightness (130 ideal)
+    avg_saturation: float,      # 0..1, higher = more colorful (b-roll signal)
+    avg_contrast: float,        # 0..1, higher = more visual interest
+    face_present: bool,
+    policy: CullPolicy,
+) -> float:
+    """
+    Compose a 0..1 highlight quality score that rewards BOTH:
+      - hero people-shots (sharpness + stability + exposure + face)
+      - b-roll (sharpness + stability + exposure + visual richness)
+
+    No face? That's fine — a steady, sharp, well-exposed, color-rich shot
+    of rings/decor/drone aerials still scores highly.
+
+    Weights:
+      stability   30%  — handheld must not jitter
+      sharpness   28%  — has to be in focus
+      exposure    14%  — well-lit, not blown out
+      richness    18%  — saturation + contrast (b-roll lifeline)
+      face bonus  +highlight_face_bonus on top
+    """
+    shake_score = min(avg_flow / SHAKE_NORM_DIVISOR, 1.0)
+    stability = 1.0 - shake_score
+
+    # Sharpness: variance of 100+ is clearly sharp; ramp from ~25 to ~150
+    sharpness = min(max((avg_blur_var - 25.0) / 125.0, 0.0), 1.0)
+
+    # Exposure: peak at 130, drop toward 0/255 (40..220 inclusive = tolerance zone)
+    ideal = 130.0
+    half_range = 90.0
+    exposure_q = max(0.0, 1.0 - abs(avg_bright - ideal) / half_range)
+
+    # Visual richness — average of saturation + contrast.
+    # A grey concrete wall = 0, a sunset over flowers = ~0.85.
+    richness = max(0.0, min(1.0, 0.55 * avg_saturation + 0.45 * avg_contrast))
+
+    base = (
+        0.30 * stability
+        + 0.28 * sharpness
+        + 0.14 * exposure_q
+        + 0.18 * richness
+        # remaining 10% lives in the face bonus when present
+    )
+
+    if face_present:
+        base = min(1.0, base + policy.highlight_face_bonus)
+
+    return round(min(max(base, 0.0), 1.0), 4)
+
+
 def _flow_mag(prev_gray: np.ndarray, curr_gray: np.ndarray) -> float:
     flow = cv2.calcOpticalFlowFarneback(
         prev_gray, curr_gray, None,
@@ -335,6 +445,19 @@ def analyze_clip_deep(
     grays: List[np.ndarray] = [cv2.cvtColor(f, cv2.COLOR_BGR2GRAY) for _, f in frames_ts]
     blurs_var: List[float] = [_frame_blur(g) for g in grays]
     brights: List[float] = [_frame_brightness(g) for g in grays]
+
+    # Per-frame face count + visual richness (only when highlight detection is on,
+    # since these add cost). Richness = saturation + contrast — recognizes great
+    # b-roll (rings, decor, drone aerials, dance lights) without faces.
+    face_counts: List[int] = [0] * len(grays)
+    sat_norms: List[float] = [0.0] * len(grays)
+    contrast_norms: List[float] = [0.0] * len(grays)
+    if policy.detect_highlights:
+        for i, g in enumerate(grays):
+            face_counts[i] = _detect_faces(g)
+            sat, ctr = _frame_richness(frames_ts[i][1])
+            sat_norms[i] = sat
+            contrast_norms[i] = ctr
 
     # Per-pair flow magnitudes (between consecutive sampled frames)
     flow_mags: List[float] = [0.0]
@@ -394,6 +517,20 @@ def analyze_clip_deep(
                     and (exp_ok or not policy.require_exposure_ok)
                 )
                 if passes:
+                    # Highlight metrics for this window
+                    window_face_frames = sum(1 for i in idxs if face_counts[i] > 0)
+                    face_present = window_face_frames > 0
+                    ws_sat = float(np.mean([sat_norms[i] for i in idxs])) if policy.detect_highlights else 0.0
+                    ws_contrast = float(np.mean([contrast_norms[i] for i in idxs])) if policy.detect_highlights else 0.0
+                    hl_quality = _highlight_quality(
+                        avg_blur_var=ws_blur,
+                        avg_flow=ws_flow,
+                        avg_bright=ws_bright,
+                        avg_saturation=ws_sat,
+                        avg_contrast=ws_contrast,
+                        face_present=face_present,
+                        policy=policy,
+                    )
                     passing_windows.append(SubClipSegment(
                         start_sec=round(t, 2),
                         end_sec=round(min(t_end, clip_end), 2),
@@ -401,6 +538,8 @@ def analyze_clip_deep(
                         shake_score=shake,
                         blur_score=blur,
                         exposure_ok=exp_ok,
+                        highlight_quality=hl_quality,
+                        face_frames=window_face_frames,
                     ))
             t += policy.sub_step_sec
 
@@ -419,10 +558,26 @@ def analyze_clip_deep(
                         shake_score=round((last.shake_score + w.shake_score) / 2, 4),
                         blur_score=round((last.blur_score + w.blur_score) / 2, 4),
                         exposure_ok=last.exposure_ok and w.exposure_ok,
+                        # Highlight quality of merged window = max of its parts
+                        # (we want the BEST moment in there to drive the highlight grade)
+                        highlight_quality=round(max(last.highlight_quality, w.highlight_quality), 4),
+                        face_frames=last.face_frames + w.face_frames,
                     )
                 else:
                     merged.append(w)
             sub_segments = [s for s in merged if s.duration_sec >= policy.sub_min_segment_sec]
+
+        # ── Highlight gating ────────────────────────────────────────────
+        # Mark which segments qualify for the highlight reel.
+        if policy.detect_highlights:
+            for seg in sub_segments:
+                qualifies = (
+                    seg.highlight_quality >= policy.highlight_quality_threshold
+                    and seg.duration_sec >= policy.highlight_min_duration_sec
+                )
+                if policy.highlight_require_face and seg.face_frames == 0:
+                    qualifies = False
+                seg.is_highlight = qualifies
 
     # Aggregate clip-level scores (still useful for fallback / display)
     avg_blur_var = float(np.mean(blurs_var)) if blurs_var else 0.0

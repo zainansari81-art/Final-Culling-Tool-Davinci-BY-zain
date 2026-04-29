@@ -218,11 +218,55 @@ def export_to_resolve(job: AnalysisJob, project_name: str) -> Dict[str, object]:
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("AppendToTimeline failed: %s", exc)
 
+    # ── Highlights timeline (best-of-the-best segments only) ─────────────
+    # Built from sub-segments where is_highlight=True. Skipped if no
+    # segments qualify or no clip has sub_segments at all (shallow mode).
+    highlight_items_appended = 0
+    media_pool.SetCurrentFolder(root_bin)
+    highlight_timeline = media_pool.CreateEmptyTimeline("Highlights")
+    if highlight_timeline is not None:
+        # Collect highlight-eligible segments in segment order, but ranked
+        # by quality within each segment so the strongest moments lead.
+        for segment in SEGMENT_ORDER:
+            seg_picks: list = []
+            for rc in imported.get(segment, []):
+                try:
+                    file_path = rc.GetClipProperty("File Path")
+                    fps_str = rc.GetClipProperty("FPS") or "24"
+                    fps = float(fps_str) if fps_str else 24.0
+                except Exception:  # noqa: BLE001
+                    file_path, fps = None, 24.0
+                review = review_by_path.get(file_path) if file_path else None
+                if not review or not review.scores.sub_segments:
+                    continue
+                for sub in review.scores.sub_segments:
+                    if not sub.is_highlight:
+                        continue
+                    seg_picks.append((sub.highlight_quality, rc, sub, fps))
+            # Best moments first within each wedding segment
+            seg_picks.sort(key=lambda x: -x[0])
+            for _q, rc, sub, fps in seg_picks:
+                try:
+                    start_frame = max(0, int(round(sub.start_sec * fps)))
+                    end_frame = max(start_frame + 1, int(round(sub.end_sec * fps)))
+                    media_pool.AppendToTimeline([{
+                        "mediaPoolItem": rc,
+                        "startFrame": start_frame,
+                        "endFrame": end_frame,
+                    }])
+                    highlight_items_appended += 1
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Highlights AppendToTimeline (%.1f-%.1fs) failed: %s",
+                        sub.start_sec, sub.end_sec, exc,
+                    )
+
     total_imported = sum(len(v) for v in imported.values())
     return {
         "success": True,
         "project_name": dated_name,
         "clips_imported": total_imported,
-        "timeline_items_appended": appended_segments,
+        "selects_timeline_items": appended_segments,
+        "highlights_timeline_items": highlight_items_appended,
         "segments": list(groups.keys()),
     }

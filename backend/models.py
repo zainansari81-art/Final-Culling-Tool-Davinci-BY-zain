@@ -29,6 +29,12 @@ class SubClipSegment(BaseModel):
     shake_score: float = Field(ge=0.0, le=1.0)
     blur_score: float = Field(ge=0.0, le=1.0)
     exposure_ok: bool = True
+    # Highlight-grade scoring — 0=unusable, 1=hero shot
+    highlight_quality: float = Field(default=0.0, ge=0.0, le=1.0)
+    # Whether this segment passes the highlight threshold (eligible for highlight reel)
+    is_highlight: bool = False
+    # Number of frames in this segment where a face was detected (rough indicator of subject presence)
+    face_frames: int = 0
 
 
 class ClipScore(BaseModel):
@@ -80,6 +86,15 @@ class CullPolicy(BaseModel):
     coverage_hash_interval_sec: float = 5.0  # one perceptual hash per N seconds across all clips
     coverage_match_distance: int = 12        # hamming distance for "same shot" pair
     coverage_min_overlap: float = 0.35       # ratio of matching hashes for two clips to cluster
+
+    # Highlight-grade detection (a stricter bar on top of usable sub-segments,
+    # for building a highlight reel from the best-of-the-best moments).
+    detect_highlights: bool = True
+    highlight_quality_threshold: float = 0.65  # 0=any segment qualifies, 1=only perfect shots
+    highlight_min_duration_sec: float = 2.0    # don't include very short bursts in highlights
+    highlight_require_face: bool = False       # if True, segments without faces don't qualify
+    highlight_face_bonus: float = 0.15         # added to quality score when faces are present
+    highlight_max_total_minutes: float = 5.0   # cap for the highlight reel (prevents bloat)
 
 
 class CullReason(str, Enum):
