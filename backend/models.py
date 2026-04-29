@@ -18,17 +18,33 @@ class JobStatus(str, Enum):
     failed = "failed"
 
 
+class SubClipSegment(BaseModel):
+    """
+    A usable segment inside a longer clip, identified by deep analysis.
+    Scores are local to this segment — averages within the window range.
+    """
+    start_sec: float = Field(ge=0.0)
+    end_sec: float = Field(ge=0.0)
+    duration_sec: float = Field(ge=0.0)
+    shake_score: float = Field(ge=0.0, le=1.0)
+    blur_score: float = Field(ge=0.0, le=1.0)
+    exposure_ok: bool = True
+
+
 class ClipScore(BaseModel):
     """Raw quality metrics computed by the analysis engine for one video clip."""
     path: str
     duration_sec: float = 0.0
     shake_score: float = Field(default=0.0, ge=0.0, le=1.0,
-                               description="0=stable, 1=very shaky")
+                               description="0=stable, 1=very shaky (clip average)")
     blur_score: float = Field(default=0.0, ge=0.0, le=1.0,
-                              description="0=sharp, 1=very blurry")
+                              description="0=sharp, 1=very blurry (clip average)")
     exposure_ok: bool = True
     duplicate_of: Optional[str] = None   # clip_id of original, or None
     scene_count: int = 1
+    # Deep-mode fields — None when shallow analysis was used
+    sub_segments: Optional[List[SubClipSegment]] = None
+    coverage_cluster_id: Optional[str] = None  # clips sharing this id are the same moment from different angles
 
 
 class ClipReview(BaseModel):
@@ -52,6 +68,18 @@ class CullPolicy(BaseModel):
     min_duration_sec: float = 1.5   # clips shorter → reject (accidental hits)
     require_exposure_ok: bool = True
     reject_duplicates: bool = True  # keep only the best in each duplicate group
+
+    # Deep analysis (sliding-window sub-clip scoring + coverage clustering).
+    # Slower (~2-3× analysis time on average) but actually looks at the whole
+    # footage — a 5-minute clip with 30 great seconds + 4 bad minutes will
+    # produce a 30-second sub-clip on the timeline instead of all-or-nothing.
+    deep_analysis: bool = False
+    sub_window_sec: float = 5.0      # rolling window for sub-clip scoring
+    sub_step_sec: float = 1.0        # advance window by this per step (denser = slower)
+    sub_min_segment_sec: float = 2.0 # don't surface sub-segments shorter than this
+    coverage_hash_interval_sec: float = 5.0  # one perceptual hash per N seconds across all clips
+    coverage_match_distance: int = 12        # hamming distance for "same shot" pair
+    coverage_min_overlap: float = 0.35       # ratio of matching hashes for two clips to cluster
 
 
 class CullReason(str, Enum):
@@ -92,6 +120,7 @@ class CreateJobRequest(BaseModel):
     folder_path: str
     included_files: Optional[List[str]] = None  # absolute paths; if set, only these are analyzed
     cull_policy: Optional[CullPolicy] = None    # if None, server defaults are used
+    deep_analysis: Optional[bool] = None        # convenience: forces cull_policy.deep_analysis=True
 
 
 class RecullRequest(BaseModel):

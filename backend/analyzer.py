@@ -29,6 +29,7 @@ from models import (
     CullReason,
     CullStats,
     JobStatus,
+    SubClipSegment,
 )
 
 logger = logging.getLogger(__name__)
@@ -132,6 +133,36 @@ def extract_keyframes(
         logger.error("Keyframe extraction failed for %s: %s", file_path, exc)
 
     return frames
+
+
+def extract_keyframes_with_ts(
+    file_path: str,
+    interval_sec: float,
+) -> List[Tuple[float, np.ndarray]]:
+    """
+    Like extract_keyframes, but returns (timestamp_sec, frame) tuples so we
+    can do windowed analysis. Still keyframe-only via skip_frame=NONREF.
+    """
+    out: List[Tuple[float, np.ndarray]] = []
+    try:
+        container = av.open(file_path)
+        video_stream = next((s for s in container.streams if s.type == "video"), None)
+        if video_stream is None:
+            return out
+        video_stream.codec_context.skip_frame = "NONREF"
+        last_pts_sec = -interval_sec
+        for packet in container.demux(video_stream):
+            for frame in packet.decode():
+                if frame.pts is None:
+                    continue
+                pts_sec = float(frame.pts * video_stream.time_base)
+                if pts_sec - last_pts_sec >= interval_sec:
+                    out.append((pts_sec, frame.to_ndarray(format="bgr24")))
+                    last_pts_sec = pts_sec
+        container.close()
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Dense keyframe extraction failed for %s: %s", file_path, exc)
+    return out
 
 
 def get_duration_sec(file_path: str) -> float:
@@ -250,6 +281,227 @@ def compute_dhash(frame: np.ndarray) -> imagehash.ImageHash:
     return imagehash.dhash(pil_img)
 
 
+# ─────────────────────────── Deep per-clip analysis ────────────────────────
+#
+# Instead of one score per clip (the average across keyframes), score every
+# rolling window inside the clip — typically 5-second windows advancing by
+# 1 second. Then merge consecutive passing windows into "usable segments"
+# so a 5-minute clip with 30 great seconds + 4 bad minutes can yield ONE
+# 30-second sub-clip on the timeline instead of all-or-nothing.
+
+def _frame_blur(gray: np.ndarray) -> float:
+    return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+def _frame_brightness(gray: np.ndarray) -> float:
+    return float(gray.mean())
+
+def _flow_mag(prev_gray: np.ndarray, curr_gray: np.ndarray) -> float:
+    flow = cv2.calcOpticalFlowFarneback(
+        prev_gray, curr_gray, None,
+        pyr_scale=0.5, levels=3, winsize=15,
+        iterations=3, poly_n=5, poly_sigma=1.2, flags=0,
+    )
+    mag, _ = cv2.cartToPolar(flow[..., 0], flow[..., 1])
+    return float(mag.mean())
+
+
+def analyze_clip_deep(
+    file_path: str,
+    policy: CullPolicy,
+) -> Tuple[ClipScore, List[SubClipSegment], Optional[np.ndarray], List[Tuple[float, "imagehash.ImageHash"]]]:
+    """
+    Deep per-clip analysis. Returns:
+      - clip_score: aggregate scores across the whole clip
+      - sub_segments: usable windows (after thresholding + merging)
+      - middle_frame: middle keyframe for the thumbnail (BGR ndarray) or None
+      - coverage_hashes: list of (timestamp_sec, dhash) for cross-clip clustering
+
+    We extract frames at sub_step_sec density (denser than the shallow path),
+    compute per-frame blur/brightness, and per-pair optical flow magnitude.
+    Then we slide a sub_window_sec window and produce window-level scores.
+    """
+    duration = get_duration_sec(file_path)
+    frames_ts = extract_keyframes_with_ts(file_path, interval_sec=policy.sub_step_sec)
+
+    if not frames_ts:
+        return (
+            ClipScore(path=file_path, duration_sec=round(duration, 2)),
+            [],
+            None,
+            [],
+        )
+
+    # Per-frame metrics + grayscale cache
+    grays: List[np.ndarray] = [cv2.cvtColor(f, cv2.COLOR_BGR2GRAY) for _, f in frames_ts]
+    blurs_var: List[float] = [_frame_blur(g) for g in grays]
+    brights: List[float] = [_frame_brightness(g) for g in grays]
+
+    # Per-pair flow magnitudes (between consecutive sampled frames)
+    flow_mags: List[float] = [0.0]
+    for i in range(1, len(grays)):
+        flow_mags.append(_flow_mag(grays[i - 1], grays[i]))
+
+    # Coverage hashes — sub-sample to coverage_hash_interval_sec.
+    coverage_hashes: List[Tuple[float, "imagehash.ImageHash"]] = []
+    last_hash_ts = -policy.coverage_hash_interval_sec
+    for (ts, frame) in frames_ts:
+        if ts - last_hash_ts >= policy.coverage_hash_interval_sec:
+            try:
+                pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                coverage_hashes.append((ts, imagehash.dhash(pil)))
+                last_hash_ts = ts
+            except Exception:
+                pass
+
+    # ── Sliding window scoring ───────────────────────────────────────────
+    # Window covers [t, t + sub_window_sec). Frames inside contribute their
+    # blur, brightness, and (between consecutive frames) flow magnitude.
+    sub_segments: List[SubClipSegment] = []
+    if duration < 0.5:
+        # Too short for windowing; produce a single segment for the whole clip
+        avg_blur = float(np.mean(blurs_var)) if blurs_var else 0.0
+        avg_flow = float(np.mean([m for m in flow_mags[1:]])) if len(flow_mags) > 1 else 0.0
+        avg_bright = float(np.mean(brights)) if brights else 0.0
+        sub_segments.append(SubClipSegment(
+            start_sec=0.0,
+            end_sec=duration,
+            duration_sec=duration,
+            shake_score=round(min(avg_flow / SHAKE_NORM_DIVISOR, 1.0), 4),
+            blur_score=round(max(0.0, 1.0 - avg_blur / BLUR_NORM_DIVISOR), 4),
+            exposure_ok=EXPOSURE_LOW <= avg_bright <= EXPOSURE_HIGH,
+        ))
+    else:
+        # Walk windows
+        clip_end = max(frames_ts[-1][0], duration)
+        t = 0.0
+        passing_windows: List[SubClipSegment] = []
+        while t < clip_end:
+            t_end = t + policy.sub_window_sec
+            # Indices of frames inside [t, t_end)
+            idxs = [i for i, (ts, _) in enumerate(frames_ts) if t <= ts < t_end]
+            if len(idxs) >= 2:
+                ws_blur = float(np.mean([blurs_var[i] for i in idxs]))
+                ws_bright = float(np.mean([brights[i] for i in idxs]))
+                # Flow between frames inside the window — skip the first index (no prior frame)
+                window_flows = [flow_mags[i] for i in idxs if i > 0 and (i - 1) in idxs]
+                ws_flow = float(np.mean(window_flows)) if window_flows else 0.0
+                shake = round(min(ws_flow / SHAKE_NORM_DIVISOR, 1.0), 4)
+                blur = round(max(0.0, 1.0 - ws_blur / BLUR_NORM_DIVISOR), 4)
+                exp_ok = EXPOSURE_LOW <= ws_bright <= EXPOSURE_HIGH
+                passes = (
+                    shake <= policy.shake_threshold
+                    and blur <= policy.blur_threshold
+                    and (exp_ok or not policy.require_exposure_ok)
+                )
+                if passes:
+                    passing_windows.append(SubClipSegment(
+                        start_sec=round(t, 2),
+                        end_sec=round(min(t_end, clip_end), 2),
+                        duration_sec=round(min(t_end, clip_end) - t, 2),
+                        shake_score=shake,
+                        blur_score=blur,
+                        exposure_ok=exp_ok,
+                    ))
+            t += policy.sub_step_sec
+
+        # Merge overlapping/contiguous passing windows into longer segments,
+        # then drop ones shorter than sub_min_segment_sec.
+        if passing_windows:
+            merged: List[SubClipSegment] = [passing_windows[0]]
+            for w in passing_windows[1:]:
+                last = merged[-1]
+                if w.start_sec <= last.end_sec + policy.sub_step_sec * 0.5:
+                    new_end = max(last.end_sec, w.end_sec)
+                    merged[-1] = SubClipSegment(
+                        start_sec=last.start_sec,
+                        end_sec=new_end,
+                        duration_sec=round(new_end - last.start_sec, 2),
+                        shake_score=round((last.shake_score + w.shake_score) / 2, 4),
+                        blur_score=round((last.blur_score + w.blur_score) / 2, 4),
+                        exposure_ok=last.exposure_ok and w.exposure_ok,
+                    )
+                else:
+                    merged.append(w)
+            sub_segments = [s for s in merged if s.duration_sec >= policy.sub_min_segment_sec]
+
+    # Aggregate clip-level scores (still useful for fallback / display)
+    avg_blur_var = float(np.mean(blurs_var)) if blurs_var else 0.0
+    avg_flow = float(np.mean(flow_mags[1:])) if len(flow_mags) > 1 else 0.0
+    mean_bright = float(np.mean(brights)) if brights else 128.0
+    clip_score = ClipScore(
+        path=file_path,
+        duration_sec=round(duration, 2),
+        shake_score=round(min(avg_flow / SHAKE_NORM_DIVISOR, 1.0), 4),
+        blur_score=round(max(0.0, 1.0 - avg_blur_var / BLUR_NORM_DIVISOR), 4),
+        exposure_ok=EXPOSURE_LOW <= mean_bright <= EXPOSURE_HIGH,
+        scene_count=1,
+        sub_segments=sub_segments,
+    )
+
+    middle_frame = frames_ts[len(frames_ts) // 2][1] if frames_ts else None
+    return clip_score, sub_segments, middle_frame, coverage_hashes
+
+
+# ─────────────────────────── Coverage clustering ────────────────────────────
+#
+# Spingle's secret sauce: identify when multiple clips are different angles of
+# the same moment, and pick the best take. We collect a perceptual hash every
+# coverage_hash_interval_sec for every clip, then for each pair compute what
+# fraction of hashes have a near-match in the other clip. Pairs above the
+# overlap threshold are linked; connected components form clusters.
+
+def cluster_by_coverage(
+    per_clip_hashes: Dict[str, List[Tuple[float, "imagehash.ImageHash"]]],
+    match_distance: int,
+    min_overlap: float,
+) -> Dict[str, str]:
+    """
+    Returns {clip_id: cluster_id}. Clips with no overlap get their own cluster id.
+    """
+    clip_ids = list(per_clip_hashes.keys())
+    if not clip_ids:
+        return {}
+
+    # Union-find
+    parent: Dict[str, str] = {cid: cid for cid in clip_ids}
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    def union(a: str, b: str) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    # Pairwise comparison — for each pair of clips, count matching hashes.
+    # A "match" = there exists a hash in B within match_distance of the hash in A.
+    for i in range(len(clip_ids)):
+        a_id = clip_ids[i]
+        a_hashes = per_clip_hashes[a_id]
+        if not a_hashes:
+            continue
+        for j in range(i + 1, len(clip_ids)):
+            b_id = clip_ids[j]
+            b_hashes = per_clip_hashes[b_id]
+            if not b_hashes:
+                continue
+            # Already in same component? Skip pairwise compute.
+            if find(a_id) == find(b_id):
+                continue
+            matches = 0
+            for _, ha in a_hashes:
+                for _, hb in b_hashes:
+                    if (ha - hb) <= match_distance:
+                        matches += 1
+                        break
+            ratio = matches / max(len(a_hashes), 1)
+            if ratio >= min_overlap:
+                union(a_id, b_id)
+
+    return {cid: find(cid) for cid in clip_ids}
+
+
 # ─────────────────────────── Auto-cull pass ────────────────────────────────
 #
 # This is the actual culling. Without this, every clip starts at approved=False
@@ -302,17 +554,50 @@ def apply_cull(clips: List[ClipReview], policy: CullPolicy) -> CullStats:
         return stats
 
     # ── Pass 1: per-clip quality gates ────────────────────────────────────
+    # Deep mode: a clip approves if it has ANY usable sub-segment passing
+    # thresholds. The clip-level average might fail while a 30-second window
+    # inside it passes — that 30-second sub-clip is the deliverable.
     for clip in clips:
         reason: Optional[CullReason] = None
 
+        # Hard rejects that apply regardless of mode
         if clip.scores.duration_sec < policy.min_duration_sec:
             reason = CullReason.too_short
-        elif policy.require_exposure_ok and not clip.scores.exposure_ok:
-            reason = CullReason.bad_exposure
-        elif clip.scores.shake_score > policy.shake_threshold:
-            reason = CullReason.too_shaky
-        elif clip.scores.blur_score > policy.blur_threshold:
-            reason = CullReason.too_blurry
+
+        # Deep clips: trust sub_segments if present
+        elif clip.scores.sub_segments is not None and len(clip.scores.sub_segments) > 0:
+            # At least one usable segment ≥ min_duration → approve
+            best_segment_quality = min(
+                (s.shake_score + s.blur_score for s in clip.scores.sub_segments),
+                default=2.0,
+            )
+            if best_segment_quality >= 2.0:
+                # No segment fits; fall back to the clip's worst-fail reason
+                if policy.require_exposure_ok and not clip.scores.exposure_ok:
+                    reason = CullReason.bad_exposure
+                elif clip.scores.shake_score > policy.shake_threshold:
+                    reason = CullReason.too_shaky
+                elif clip.scores.blur_score > policy.blur_threshold:
+                    reason = CullReason.too_blurry
+                else:
+                    reason = CullReason.too_blurry  # safety net
+        elif clip.scores.sub_segments is not None and len(clip.scores.sub_segments) == 0:
+            # Deep mode ran but produced ZERO usable sub-segments → reject
+            # using the dominant per-clip failure reason
+            if policy.require_exposure_ok and not clip.scores.exposure_ok:
+                reason = CullReason.bad_exposure
+            elif clip.scores.shake_score > clip.scores.blur_score:
+                reason = CullReason.too_shaky
+            else:
+                reason = CullReason.too_blurry
+        else:
+            # Shallow mode: clip-level averages drive the decision
+            if policy.require_exposure_ok and not clip.scores.exposure_ok:
+                reason = CullReason.bad_exposure
+            elif clip.scores.shake_score > policy.shake_threshold:
+                reason = CullReason.too_shaky
+            elif clip.scores.blur_score > policy.blur_threshold:
+                reason = CullReason.too_blurry
 
         if reason is not None:
             clip.approved = False
@@ -406,9 +691,43 @@ def save_thumbnail(frame: np.ndarray, job_id: str, clip_id: str) -> str:
 
 # ─────────────────────────── Per-clip pipeline ──────────────────────────────
 
+def analyze_single_clip_deep(
+    file_path: str,
+    job_id: str,
+    policy: CullPolicy,
+) -> Tuple[ClipReview, List[Tuple[float, "imagehash.ImageHash"]]]:
+    """
+    Deep version: sliding-window scoring + returns coverage hashes for
+    cross-clip clustering (handled later in analyze_folder).
+    """
+    clip_id = str(uuid.uuid4())
+    filename = Path(file_path).name
+    logger.info("Deep analyzing: %s", filename)
+
+    score, sub_segments, middle_frame, coverage_hashes = analyze_clip_deep(file_path, policy)
+
+    thumbnail_path: Optional[str] = None
+    if middle_frame is not None:
+        thumbnail_path = save_thumbnail(middle_frame, job_id, clip_id)
+
+    suggested_segment = classify_segment(file_path)
+
+    review = ClipReview(
+        clip_id=clip_id,
+        path=file_path,
+        filename=filename,
+        thumbnail_path=thumbnail_path,
+        scores=score,
+        suggested_segment=suggested_segment,
+        approved=False,
+        segment_label=suggested_segment,
+    )
+    return review, coverage_hashes
+
+
 def analyze_single_clip(file_path: str, job_id: str) -> ClipReview:
     """
-    Full analysis pipeline for one video file.
+    Shallow per-clip pipeline (one score per clip, fast).
     Designed to be called inside a thread-pool worker.
     """
     clip_id = str(uuid.uuid4())
@@ -503,21 +822,40 @@ def analyze_folder(
             jobs_store[job_id] = job
             return
 
-        logger.info("Found %d video files in %s", total, folder_path)
+        policy_for_run = cull_policy or job.cull_policy or CullPolicy()
+        deep = bool(policy_for_run.deep_analysis)
+        logger.info(
+            "Found %d video files in %s (mode: %s)",
+            total, folder_path, "DEEP (sliding window + coverage clustering)" if deep else "shallow",
+        )
 
         clip_results: List[ClipReview] = []
+        # In deep mode we collect coverage hashes per clip during the worker pass
+        # so we can cluster after all clips finish.
+        coverage_hashes_by_clip: Dict[str, List[Tuple[float, "imagehash.ImageHash"]]] = {}
 
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            future_to_path = {
-                executor.submit(analyze_single_clip, fp, job_id): fp
-                for fp in video_files
-            }
+            if deep:
+                future_to_path = {
+                    executor.submit(analyze_single_clip_deep, fp, job_id, policy_for_run): fp
+                    for fp in video_files
+                }
+            else:
+                future_to_path = {
+                    executor.submit(analyze_single_clip, fp, job_id): fp
+                    for fp in video_files
+                }
             completed = 0
             for future in as_completed(future_to_path):
                 fp = future_to_path[future]
                 try:
                     result = future.result()
-                    clip_results.append(result)
+                    if deep:
+                        review, hashes = result
+                        clip_results.append(review)
+                        coverage_hashes_by_clip[review.clip_id] = hashes
+                    else:
+                        clip_results.append(result)
                 except Exception as exc:  # noqa: BLE001
                     logger.error("Failed to analyze %s: %s", fp, exc)
                     # Stub entry so the clip still appears in the review UI
@@ -534,7 +872,7 @@ def analyze_folder(
                     )
                 finally:
                     completed += 1
-                    pct = round((completed / total) * 95.0, 1)  # leave 5% for dup pass
+                    pct = round((completed / total) * 90.0, 1)  # leave 10% for clustering passes
                     job.progress = pct
                     jobs_store[job_id] = job
                     logger.info(
@@ -542,12 +880,55 @@ def analyze_folder(
                         completed, total, pct, Path(fp).name,
                     )
 
-        # ── Duplicate detection pass ──────────────────────────────────────
-        logger.info("Running duplicate detection across %d clips…", len(clip_results))
+        # ── Duplicate / coverage detection pass ──────────────────────────
+        if deep and coverage_hashes_by_clip:
+            logger.info(
+                "Coverage clustering across %d clips (interval=%.1fs, dist≤%d, overlap≥%.0f%%)…",
+                len(coverage_hashes_by_clip),
+                policy_for_run.coverage_hash_interval_sec,
+                policy_for_run.coverage_match_distance,
+                100 * policy_for_run.coverage_min_overlap,
+            )
+            job.progress = 92.0
+            jobs_store[job_id] = job
+            cluster_map = cluster_by_coverage(
+                coverage_hashes_by_clip,
+                match_distance=policy_for_run.coverage_match_distance,
+                min_overlap=policy_for_run.coverage_min_overlap,
+            )
+            # Annotate clips with cluster_id; treat clips in same cluster as
+            # mutual duplicates for the auto-cull dedup pass (best-take wins).
+            cluster_sizes: Dict[str, int] = {}
+            for cid, cluster_id in cluster_map.items():
+                cluster_sizes[cluster_id] = cluster_sizes.get(cluster_id, 0) + 1
+            multi_clusters = {cid: cl for cid, cl in cluster_map.items() if cluster_sizes[cl] > 1}
+            for clip in clip_results:
+                cl = cluster_map.get(clip.clip_id)
+                if cl is None:
+                    continue
+                clip.scores.coverage_cluster_id = cl
+                # Wire cluster into duplicate_of so apply_cull keeps the best take.
+                # Pick the cluster's first-seen clip as the "head" for dedup logic.
+                if cluster_sizes[cl] > 1:
+                    head = sorted([c for c, x in cluster_map.items() if x == cl])[0]
+                    if clip.clip_id != head:
+                        clip.scores.duplicate_of = head
+            multi_count = sum(1 for s in cluster_sizes.values() if s > 1)
+            in_multi = sum(s for s in cluster_sizes.values() if s > 1)
+            logger.info(
+                "Coverage clusters: %d multi-clip clusters covering %d clips",
+                multi_count, in_multi,
+            )
+
+        # Always also run filename/single-frame dedup as a backup pass — it's cheap
+        # and catches exact duplicates that hashing differently might miss.
+        logger.info("Running fast duplicate detection across %d clips…", len(clip_results))
         job.progress = 96.0
         jobs_store[job_id] = job
         representative_hashes: Dict[str, imagehash.ImageHash] = {}
         for clip in clip_results:
+            if clip.scores.duplicate_of is not None:
+                continue  # already linked by coverage clustering
             try:
                 frames = extract_keyframes(clip.path, interval_sec=5.0)
                 if frames:
@@ -558,16 +939,16 @@ def analyze_folder(
                 logger.warning("Hash failed for %s: %s", clip.path, exc)
 
         dup_map = find_duplicates(
-            [c.clip_id for c in clip_results],
+            [c.clip_id for c in clip_results if c.scores.duplicate_of is None],
             representative_hashes,
         )
         dup_count = 0
         for clip in clip_results:
             dup_target = dup_map.get(clip.clip_id)
-            if dup_target is not None:
+            if dup_target is not None and clip.scores.duplicate_of is None:
                 clip.scores.duplicate_of = dup_target
                 dup_count += 1
-        logger.info("Found %d duplicate(s)", dup_count)
+        logger.info("Found %d additional fast-dup match(es)", dup_count)
 
         # ── Auto-cull pass ────────────────────────────────────────────────
         # This is what turns "I have scores" into "I have a curated edit".

@@ -152,6 +152,9 @@ def create_job(body: CreateJobRequest) -> AnalysisJob:
         )
 
     policy = body.cull_policy or CullPolicy()
+    if body.deep_analysis is not None:
+        # Convenience flag — overrides whatever was in cull_policy.deep_analysis
+        policy = policy.model_copy(update={"deep_analysis": body.deep_analysis})
     job = AnalysisJob(
         id=str(uuid.uuid4()),
         folder_path=str(folder.resolve()),

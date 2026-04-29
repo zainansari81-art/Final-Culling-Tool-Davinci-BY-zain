@@ -156,23 +156,73 @@ def export_to_resolve(job: AnalysisJob, project_name: str) -> Dict[str, object]:
                 logger.warning("SetClipColor failed: %s", exc)
 
     # ── Selects timeline ───────────────────────────────────────────────────
+    # When deep analysis produced sub_segments for a clip, place ONLY those
+    # segments on the timeline (not the whole clip). The Resolve scripting
+    # API accepts either a raw MediaPoolItem or a dict with mediaPoolItem,
+    # startFrame, endFrame (frame numbers, computed from the clip's fps).
     media_pool.SetCurrentFolder(root_bin)
     timeline = media_pool.CreateEmptyTimeline("Selects")
 
+    # Build lookup: file_path -> ClipReview, file_path -> MediaPoolItem
+    review_by_path: Dict[str, ClipReview] = {c.path: c for c in job.clips}
+    imported_by_path: Dict[str, object] = {}
+    for segment, clips in imported.items():
+        for rc in clips:
+            try:
+                p = rc.GetClipProperty("File Path")
+                if p:
+                    imported_by_path[p] = rc
+            except Exception:  # noqa: BLE001
+                pass
+
+    appended_segments = 0
     if timeline is None:
         logger.warning("Could not create 'Selects' timeline.")
     else:
         for segment in SEGMENT_ORDER:
             for rc in imported.get(segment, []):
                 try:
-                    media_pool.AppendToTimeline([rc])
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("AppendToTimeline failed: %s", exc)
+                    file_path = rc.GetClipProperty("File Path")
+                except Exception:  # noqa: BLE001
+                    file_path = None
+                review = review_by_path.get(file_path) if file_path else None
+                sub_segments = review.scores.sub_segments if review and review.scores.sub_segments else None
+
+                if sub_segments and len(sub_segments) > 0:
+                    # Use frame-accurate in/out points per sub-segment
+                    try:
+                        fps_str = rc.GetClipProperty("FPS") or "24"
+                        fps = float(fps_str) if fps_str else 24.0
+                    except Exception:  # noqa: BLE001
+                        fps = 24.0
+                    for seg in sub_segments:
+                        try:
+                            start_frame = max(0, int(round(seg.start_sec * fps)))
+                            end_frame = max(start_frame + 1, int(round(seg.end_sec * fps)))
+                            media_pool.AppendToTimeline([{
+                                "mediaPoolItem": rc,
+                                "startFrame": start_frame,
+                                "endFrame": end_frame,
+                            }])
+                            appended_segments += 1
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning(
+                                "AppendToTimeline (sub-segment %.1f-%.1fs) failed: %s",
+                                seg.start_sec, seg.end_sec, exc,
+                            )
+                else:
+                    # No sub-segments — fall back to the whole clip
+                    try:
+                        media_pool.AppendToTimeline([rc])
+                        appended_segments += 1
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("AppendToTimeline failed: %s", exc)
 
     total_imported = sum(len(v) for v in imported.values())
     return {
         "success": True,
         "project_name": dated_name,
         "clips_imported": total_imported,
+        "timeline_items_appended": appended_segments,
         "segments": list(groups.keys()),
     }
