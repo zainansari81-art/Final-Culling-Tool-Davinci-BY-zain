@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+av                    # PyAV -- keyframe extraction
+opencv-python-headless
+scenedetect[opencv]   # PySceneDetect
+imagehash
+Pillow
+numpy
+aiofiles
+python-multipart
