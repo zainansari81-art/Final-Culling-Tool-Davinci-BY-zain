@@ -136,11 +136,57 @@ class CreateJobRequest(BaseModel):
     included_files: Optional[List[str]] = None  # absolute paths; if set, only these are analyzed
     cull_policy: Optional[CullPolicy] = None    # if None, server defaults are used
     deep_analysis: Optional[bool] = None        # convenience: forces cull_policy.deep_analysis=True
+    style_profile_id: Optional[str] = None      # apply a learned editor's style to thresholds
 
 
 class RecullRequest(BaseModel):
     """POST /jobs/{id}/cull — re-run the cull pass with new thresholds."""
     cull_policy: CullPolicy
+
+
+class StyleProfile(BaseModel):
+    """
+    Learned editing style derived from one or more fully-edited reference
+    wedding videos. The profile captures the editor's pacing, quality
+    standards, and aesthetic so a new analysis pass can match it.
+
+    All metrics are aggregates across every detected shot in every reference.
+    """
+    id: str
+    name: str
+    reference_paths: List[str]
+    reference_count: int = 0
+    total_shots_analyzed: int = 0
+
+    # Pacing
+    shot_length_p25_sec: float = 2.0
+    shot_length_median_sec: float = 4.0
+    shot_length_p75_sec: float = 7.0
+    shot_length_mean_sec: float = 5.0
+
+    # Quality baseline (editor's ship bar)
+    sharpness_p25: float = 80.0       # raw Laplacian variance — editor's lowest sharpness
+    sharpness_median: float = 140.0
+    saturation_mean: float = 0.45     # 0..1
+    contrast_mean: float = 0.50       # 0..1
+    brightness_mean: float = 130.0
+    shake_p75: float = 0.30           # 75th percentile shake_score across reference shots
+
+    # Subject mix
+    face_ratio: float = 0.40          # fraction of shots that contain faces
+
+    # Highlight grade — what the editor's average shot scores
+    highlight_quality_p50: float = 0.60
+    highlight_quality_p75: float = 0.75
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    notes: Optional[str] = None
+
+
+class StyleProfileRequest(BaseModel):
+    """POST /style-profiles — extract a profile from reference videos."""
+    name: str
+    reference_paths: List[str]
 
 
 class FsEntry(BaseModel):

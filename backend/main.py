@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from collections import defaultdict, deque
@@ -36,8 +37,11 @@ from models import (
     JobStatus,
     RecullRequest,
     ResolveExportRequest,
+    StyleProfile,
+    StyleProfileRequest,
     UpdateClipRequest,
 )
+from style import apply_style_to_policy, extract_style_profile
 
 # ─────────────────────────── Logging ────────────────────────────────────────
 
@@ -69,6 +73,36 @@ app.add_middleware(
 # ─────────────────────────── In-memory job store ─────────────────────────────
 
 jobs: Dict[str, AnalysisJob] = {}
+
+# ─────────────────────────── Style profile store ─────────────────────────────
+# Profiles persist to disk so they survive restart. Keyed by profile id.
+
+STYLE_PROFILES_DIR = Path.home() / ".wedding-culling"
+STYLE_PROFILES_FILE = STYLE_PROFILES_DIR / "style_profiles.json"
+
+_style_profiles: Dict[str, StyleProfile] = {}
+
+def _load_style_profiles() -> None:
+    global _style_profiles
+    if not STYLE_PROFILES_FILE.exists():
+        _style_profiles = {}
+        return
+    try:
+        with STYLE_PROFILES_FILE.open() as f:
+            data = json.load(f)
+        _style_profiles = {pid: StyleProfile(**p) for pid, p in data.items()}
+        logger.info("Loaded %d style profile(s) from %s", len(_style_profiles), STYLE_PROFILES_FILE)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not read style profiles: %s", exc)
+        _style_profiles = {}
+
+def _save_style_profiles() -> None:
+    STYLE_PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {pid: p.model_dump(mode="json") for pid, p in _style_profiles.items()}
+    with STYLE_PROFILES_FILE.open("w") as f:
+        json.dump(payload, f, indent=2, default=str)
+
+_load_style_profiles()
 
 # Per-job log ring buffers so the frontend can stream activity live.
 JOB_LOG_LIMIT = 2000
@@ -155,6 +189,23 @@ def create_job(body: CreateJobRequest) -> AnalysisJob:
     if body.deep_analysis is not None:
         # Convenience flag — overrides whatever was in cull_policy.deep_analysis
         policy = policy.model_copy(update={"deep_analysis": body.deep_analysis})
+
+    # Apply learned editor style if a style_profile_id was supplied
+    if body.style_profile_id:
+        profile = _style_profiles.get(body.style_profile_id)
+        if profile is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Style profile not found: {body.style_profile_id}",
+            )
+        policy = apply_style_to_policy(policy, profile)
+        logger.info(
+            "Applied style profile '%s' (id=%s): shake_threshold=%.2f, "
+            "blur_threshold=%.2f, sub_min_segment_sec=%.1f, highlight_q=%.2f",
+            profile.name, profile.id, policy.shake_threshold,
+            policy.blur_threshold, policy.sub_min_segment_sec,
+            policy.highlight_quality_threshold,
+        )
     job = AnalysisJob(
         id=str(uuid.uuid4()),
         folder_path=str(folder.resolve()),
@@ -289,6 +340,65 @@ def update_clip(
 
     jobs[job_id] = job
     return clip
+
+
+# ─────────────────────────── Style profiles ────────────────────────────────
+
+@app.get(
+    "/style-profiles",
+    response_model=list[StyleProfile],
+    summary="List all known editor-style profiles",
+)
+def list_style_profiles() -> list[StyleProfile]:
+    return sorted(_style_profiles.values(), key=lambda p: p.created_at, reverse=True)
+
+
+@app.post(
+    "/style-profiles",
+    response_model=StyleProfile,
+    status_code=status.HTTP_201_CREATED,
+    summary="Extract an editor-style profile from one or more reference videos. "
+            "BLOCKS until extraction completes; can take 1-3 minutes per reference.",
+)
+def create_style_profile(body: StyleProfileRequest) -> StyleProfile:
+    if not body.reference_paths:
+        raise HTTPException(status_code=400, detail="reference_paths must not be empty")
+    for p in body.reference_paths:
+        if not Path(p).is_file():
+            raise HTTPException(status_code=400, detail=f"Reference not found: {p}")
+
+    logger.info(
+        "Extracting style profile '%s' from %d reference(s)…",
+        body.name, len(body.reference_paths),
+    )
+    profile = extract_style_profile(body.name, body.reference_paths)
+    _style_profiles[profile.id] = profile
+    _save_style_profiles()
+    return profile
+
+
+@app.get(
+    "/style-profiles/{profile_id}",
+    response_model=StyleProfile,
+    summary="Get a style profile by id",
+)
+def get_style_profile(profile_id: str) -> StyleProfile:
+    profile = _style_profiles.get(profile_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Style profile not found")
+    return profile
+
+
+@app.delete(
+    "/style-profiles/{profile_id}",
+    summary="Delete a style profile",
+)
+def delete_style_profile(profile_id: str) -> Dict[str, Any]:
+    if profile_id not in _style_profiles:
+        raise HTTPException(status_code=404, detail="Style profile not found")
+    del _style_profiles[profile_id]
+    _save_style_profiles()
+    return {"deleted": profile_id}
 
 
 # ─────────────────────────── Re-cull (tune thresholds live) ─────────────────
