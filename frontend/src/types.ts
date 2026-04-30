@@ -29,6 +29,13 @@ export interface AnalysisJob {
 export interface CreateJobRequest {
   folder_path: string
   included_files?: string[]
+  deep_analysis?: boolean
+  cull_policy?: {
+    deep_analysis?: boolean
+    ai_grading?: boolean
+    detect_highlights?: boolean
+    ai_max_concurrent?: number
+  }
 }
 
 export interface UpdateClipRequest {

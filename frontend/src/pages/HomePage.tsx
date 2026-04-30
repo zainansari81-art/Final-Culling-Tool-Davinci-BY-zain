@@ -50,6 +50,8 @@ export default function HomePage() {
   const [includedFiles, setIncludedFiles] = useState<string[] | null>(null)
   const [selectedCount, setSelectedCount] = useState(0)
   const [activeJob, setActiveJob] = useState<AnalysisJob | null>(null)
+  const [deepAnalysis, setDeepAnalysis] = useState(true)
+  const [aiGrading, setAiGrading] = useState(false)
 
   const loadJobs = async () => {
     try {
@@ -95,6 +97,13 @@ export default function HomePage() {
       const job = await api.createJob({
         folder_path: folderPath,
         included_files: includedFiles ?? undefined,
+        deep_analysis: deepAnalysis,
+        cull_policy: {
+          deep_analysis: deepAnalysis,
+          ai_grading: aiGrading,
+          detect_highlights: true,
+          ai_max_concurrent: 4,
+        },
       })
       setActiveJob(job)
       setOpenStep('analyzing')
@@ -191,6 +200,51 @@ export default function HomePage() {
                   }}
                 />
                 <Separator />
+                {/* Analysis options */}
+                <div className="px-4 py-3 space-y-2.5 border-b border-border/50">
+                  <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Analysis options
+                  </div>
+                  <label className="flex items-start gap-3 cursor-pointer group" htmlFor="opt-deep">
+                    <input
+                      id="opt-deep"
+                      type="checkbox"
+                      checked={deepAnalysis}
+                      onChange={(e) => setDeepAnalysis(e.target.checked)}
+                      disabled={!!activeJob}
+                      className="mt-0.5 size-4 accent-primary cursor-pointer disabled:opacity-50"
+                    />
+                    <div className="flex-1">
+                      <div className="text-sm font-medium">Deep analysis</div>
+                      <div className="text-xs text-muted-foreground">
+                        Sliding-window scoring + cross-clip coverage clustering. Identifies usable
+                        sub-segments inside long clips and groups multi-cam coverage. ~2-3× slower.
+                      </div>
+                    </div>
+                  </label>
+                  <label className="flex items-start gap-3 cursor-pointer group" htmlFor="opt-ai">
+                    <input
+                      id="opt-ai"
+                      type="checkbox"
+                      checked={aiGrading}
+                      onChange={(e) => setAiGrading(e.target.checked)}
+                      disabled={!!activeJob || !deepAnalysis}
+                      className="mt-0.5 size-4 accent-primary cursor-pointer disabled:opacity-50"
+                    />
+                    <div className="flex-1">
+                      <div className="text-sm font-medium flex items-center gap-1.5">
+                        AI grading
+                        <span className="text-[10px] font-normal text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                          requires deep
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        Claude vision rates each sub-segment 1-10 with shot type, issues, and editorial reasoning.
+                        Slower (~10s/clip) and uses Claude subscription budget. Frame-cached so re-runs are free.
+                      </div>
+                    </div>
+                  </label>
+                </div>
                 <div className="flex items-center justify-between gap-3 px-4 py-3">
                   <p className="text-xs text-muted-foreground">
                     {selectedCount > 0
@@ -212,7 +266,7 @@ export default function HomePage() {
                     ) : (
                       <>
                         <Sparkles className="h-4 w-4" />
-                        Run analysis
+                        {aiGrading ? 'Run AI culling' : deepAnalysis ? 'Run deep analysis' : 'Run analysis'}
                       </>
                     )}
                   </Button>
