@@ -31,6 +31,11 @@ from models import (
     JobStatus,
     SubClipSegment,
 )
+# Lazy import to avoid circular dependency on cold start
+try:
+    from ai_grader import grade_all_clips_parallel
+except Exception:  # noqa: BLE001
+    grade_all_clips_parallel = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -1123,6 +1128,50 @@ def analyze_folder(
             stats.rejected_shaky, stats.rejected_blurry,
             stats.rejected_exposure, stats.rejected_duplicate,
         )
+
+        # ── AI grading pass ───────────────────────────────────────────────
+        # Only graded segments that survived the metric cull, so we don't burn
+        # budget on already-rejected clips. AI score blends into highlight_quality
+        # via ai_blend_weight, and updates is_highlight accordingly.
+        if policy.ai_grading and policy.deep_analysis and grade_all_clips_parallel is not None:
+            graded_inputs: List[Tuple[str, List[SubClipSegment]]] = []
+            for c in clip_results:
+                if not c.approved:
+                    continue
+                if c.scores.sub_segments:
+                    graded_inputs.append((c.path, c.scores.sub_segments))
+            seg_total = sum(len(s) for _, s in graded_inputs)
+            if seg_total > 0:
+                logger.info(
+                    "AI grading: %d sub-segments across %d approved clips "
+                    "(parallel=%d, est. cost ~$%.2f)",
+                    seg_total, len(graded_inputs), policy.ai_max_concurrent,
+                    seg_total * 0.05,
+                )
+                job.progress = 97.0
+                jobs_store[job_id] = job
+                graded = grade_all_clips_parallel(graded_inputs, policy)
+                logger.info("AI grading: %d/%d segments graded", graded, seg_total)
+
+                # Blend AI score into highlight_quality and re-evaluate is_highlight
+                w = max(0.0, min(1.0, policy.ai_blend_weight))
+                for clip in clip_results:
+                    if not clip.scores.sub_segments:
+                        continue
+                    for seg in clip.scores.sub_segments:
+                        if seg.ai_score is not None:
+                            ai_norm = seg.ai_score / 10.0
+                            blended = (1.0 - w) * seg.highlight_quality + w * ai_norm
+                            seg.highlight_quality = round(blended, 4)
+                            # Re-evaluate is_highlight after blend
+                            qualifies = (
+                                seg.highlight_quality >= policy.highlight_quality_threshold
+                                and seg.duration_sec >= policy.highlight_min_duration_sec
+                                and seg.ai_score >= policy.ai_min_score_to_keep
+                            )
+                            if policy.highlight_require_face and seg.face_frames == 0:
+                                qualifies = False
+                            seg.is_highlight = qualifies
 
         job.clips = clip_results
         job.cull_policy = policy

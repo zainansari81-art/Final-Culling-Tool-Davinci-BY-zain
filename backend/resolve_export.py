@@ -242,7 +242,10 @@ def export_to_resolve(job: AnalysisJob, project_name: str) -> Dict[str, object]:
                 for sub in review.scores.sub_segments:
                     if not sub.is_highlight:
                         continue
-                    seg_picks.append((sub.highlight_quality, rc, sub, fps))
+                    # Rank by AI score when available (it's the editorial call);
+                    # fall back to metric-derived highlight_quality.
+                    rank = sub.ai_score / 10.0 if sub.ai_score is not None else sub.highlight_quality
+                    seg_picks.append((rank, rc, sub, fps))
             # Best moments first within each wedding segment
             seg_picks.sort(key=lambda x: -x[0])
             for _q, rc, sub, fps in seg_picks:

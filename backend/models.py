@@ -35,6 +35,12 @@ class SubClipSegment(BaseModel):
     is_highlight: bool = False
     # Number of frames in this segment where a face was detected (rough indicator of subject presence)
     face_frames: int = 0
+    # AI grading (populated when cull_policy.ai_grading=True). None when not graded.
+    ai_score: Optional[int] = None             # 1..10, Claude's highlight-worthiness rating
+    ai_shot_type: Optional[str] = None          # face_closeup | b_roll_detail | drone_aerial | reaction | etc.
+    ai_issues: Optional[List[str]] = None       # list of issues Claude flagged (or empty)
+    ai_subject: Optional[str] = None            # short phrase: "groom kissing bride", "ring on velvet"
+    ai_why: Optional[str] = None                # one-sentence editorial reason for the score
 
 
 class ClipScore(BaseModel):
@@ -95,6 +101,17 @@ class CullPolicy(BaseModel):
     highlight_require_face: bool = False       # if True, segments without faces don't qualify
     highlight_face_bonus: float = 0.15         # added to quality score when faces are present
     highlight_max_total_minutes: float = 5.0   # cap for the highlight reel (prevents bloat)
+
+    # AI grading via Claude vision. SLOW + costs subscription budget but adds
+    # actual editorial judgment ("this is a hero shot" / "workhorse b-roll" /
+    # "awkward subject"). Only graded segments that already passed metric
+    # thresholds, so failed clips don't waste calls. Cached on disk by frame
+    # hash so re-runs are free.
+    ai_grading: bool = False
+    ai_max_concurrent: int = 4              # parallel Claude calls
+    ai_timeout_sec: float = 60.0
+    ai_blend_weight: float = 0.50           # how much AI score sways highlight_quality (0..1)
+    ai_min_score_to_keep: int = 0           # if >0, AI scores below this auto-reject from highlights
 
 
 class CullReason(str, Enum):
