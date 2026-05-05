@@ -234,13 +234,75 @@ Clips:
 {clips_text}
 
 Respond with ONLY this JSON, nothing else:
-{{ "order": ["<clip_id_first>", ..., "<clip_id_last>"] }}
+{{
+  "items": [
+    {{ "clip_id": "<id>", "confidence": <0-100 int> }},
+    ...
+  ]
+}}
+The items array must list every clip exactly once, in best narrative order.
+Each `confidence` is how sure you are this clip belongs at THIS position
+(100 = certain, 50 = could swap with neighbor, 20 = unsure).
 """
 
 
-def order_segment(segment: str, clips: List[Dict[str, Any]]) -> Optional[List[str]]:
-    """Ask Gemini to order clips for narrative flow within a segment."""
-    return _ask_for_order(_SEQUENCE_PROMPT, segment, clips)
+def order_segment(
+    segment: str,
+    clips: List[Dict[str, Any]],
+) -> Optional[List[Dict[str, Any]]]:
+    """Ask Gemini to order clips for narrative flow within a segment.
+
+    Returns [{"clip_id": str, "confidence": int}, ...] or None on failure.
+    """
+    from google.genai import types
+
+    if len(clips) < 2:
+        return [{"clip_id": c["clip_id"], "confidence": 100} for c in clips] if clips else None
+
+    prompt = _SEQUENCE_PROMPT.format(
+        segment=segment,
+        clips_text="\n\n".join(_format_clip_for_rank(c) for c in clips),
+    )
+
+    try:
+        resp = _client().models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
+            config=types.GenerateContentConfig(
+                temperature=0.2,
+                response_mime_type="application/json",
+                max_output_tokens=2048,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Gemini order request failed for %s: %s", segment, exc)
+        return None
+
+    text = (resp.text or "").strip()
+    parsed = _parse_json(text)
+    if not parsed:
+        return None
+    items_raw = parsed.get("items") if isinstance(parsed, dict) else None
+    if not isinstance(items_raw, list):
+        return None
+
+    valid_ids = {c["clip_id"] for c in clips}
+    seen: set[str] = set()
+    out: List[Dict[str, Any]] = []
+    for item in items_raw:
+        if not isinstance(item, dict):
+            continue
+        cid = item.get("clip_id")
+        conf = item.get("confidence", 50)
+        if isinstance(cid, str) and cid in valid_ids and cid not in seen:
+            try:
+                conf_f = max(0.0, min(100.0, float(conf)))
+            except (TypeError, ValueError):
+                conf_f = 50.0
+            out.append({"clip_id": cid, "confidence": conf_f})
+            seen.add(cid)
+    return out or None
 
 
 def _ask_for_order(

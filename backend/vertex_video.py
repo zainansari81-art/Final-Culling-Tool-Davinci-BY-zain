@@ -100,6 +100,8 @@ def analyze_video(gcs_uri: str, timeout_sec: int = 600) -> Dict[str, Any]:
         speech_transcription_config=vi.SpeechTranscriptionConfig(
             language_code="en-US",
             enable_automatic_punctuation=True,
+            enable_speaker_diarization=True,
+            diarization_speaker_count=2,  # most wedding clips have 1-2 speakers
         ),
         label_detection_config=vi.LabelDetectionConfig(
             label_detection_mode=vi.LabelDetectionMode.SHOT_AND_FRAME_MODE,
@@ -175,10 +177,12 @@ def _flatten_response(response) -> Dict[str, Any]:
                 token = (w.word or "").strip()
                 if not token:
                     continue
+                spk = getattr(w, "speaker_tag", None)
                 words.append({
                     "word": token,
                     "start_sec": _ts(w.start_time),
                     "end_sec": _ts(w.end_time),
+                    "speaker_tag": int(spk) if spk else None,
                 })
     transcript = " ".join(transcript_parts).strip()
     words.sort(key=lambda x: x["start_sec"])

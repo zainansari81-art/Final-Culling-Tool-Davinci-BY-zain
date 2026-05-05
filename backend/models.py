@@ -38,6 +38,7 @@ class WordInfo(BaseModel):
     word: str
     start_sec: float
     end_sec: float
+    speaker_tag: Optional[int] = None  # 1, 2, ... when diarization ran
 
 
 class ClipScore(BaseModel):
@@ -69,6 +70,8 @@ class ClipScore(BaseModel):
     rank_in_group: Optional[int] = None           # 1 = best within ai_segment
     sequence_position: Optional[int] = None       # 1-based narrative order
     dialogue_trimmed: bool = False                # in/out came from speech
+    clip_type: str = "BROLL"                      # "AROLL" (dialogue) | "BROLL"
+    placement_confidence: Optional[float] = None  # 0-100 from Gemini
 
 
 class ClipReview(BaseModel):
@@ -92,6 +95,8 @@ class AnalysisJob(BaseModel):
     clips: List[ClipReview] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     error: Optional[str] = None
+    # User-editable mapping of "speaker_1" -> "John" etc.
+    speaker_names: dict[str, str] = Field(default_factory=dict)
 
 
 class CreateJobRequest(BaseModel):
@@ -119,6 +124,14 @@ class UpdateClipRequest(BaseModel):
     """PATCH body for /jobs/{job_id}/clips/{clip_id}."""
     approved: Optional[bool] = None
     segment_label: Optional[str] = None
+    sequence_position: Optional[int] = None
+    ai_in_sec: Optional[float] = None
+    ai_out_sec: Optional[float] = None
+
+
+class UpdateSpeakerNamesRequest(BaseModel):
+    """PUT body for /jobs/{job_id}/speakers — full replace of the mapping."""
+    speaker_names: dict[str, str]
 
 
 class ResolveExportRequest(BaseModel):

@@ -34,6 +34,7 @@ from models import (
     JobStatus,
     ResolveExportRequest,
     UpdateClipRequest,
+    UpdateSpeakerNamesRequest,
 )
 
 # ─────────────────────────── Logging ────────────────────────────────────────
@@ -340,9 +341,119 @@ def update_clip(
         clip.approved = body.approved
     if body.segment_label is not None:
         clip.segment_label = body.segment_label
+    if body.sequence_position is not None:
+        clip.scores.sequence_position = max(1, int(body.sequence_position))
+    if body.ai_in_sec is not None:
+        clip.scores.ai_in_sec = max(0.0, float(body.ai_in_sec))
+    if body.ai_out_sec is not None:
+        clip.scores.ai_out_sec = max(
+            (clip.scores.ai_in_sec or 0.0) + 0.1,
+            float(body.ai_out_sec),
+        )
 
     jobs[job_id] = job
     return clip
+
+
+# ─────────────────────────── Speaker names ───────────────────────────────────
+
+@app.get(
+    "/jobs/{job_id}/speakers",
+    summary="Read speaker name mapping for this job",
+)
+def get_speakers(job_id: str) -> Dict[str, str]:
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job.speaker_names
+
+
+@app.put(
+    "/jobs/{job_id}/speakers",
+    summary="Replace speaker name mapping (e.g. 'speaker_1' -> 'John')",
+)
+def put_speakers(
+    job_id: str, body: UpdateSpeakerNamesRequest,
+) -> Dict[str, str]:
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job.speaker_names = body.speaker_names
+    jobs[job_id] = job
+    return job.speaker_names
+
+
+# ─────────────────────────── Sequence transcript ─────────────────────────────
+
+@app.get(
+    "/jobs/{job_id}/sequence",
+    summary="Whole-job sequence: clips in timeline order with transcripts",
+)
+def get_sequence(job_id: str) -> Dict[str, Any]:
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    items: list[Dict[str, Any]] = []
+    detected_speakers: set[int] = set()
+
+    # Order: by segment chronology, then sequence_position within
+    from fcpxml_export import SEGMENT_ORDER as _SEG_ORDER
+
+    def seg_index(seg: str) -> int:
+        try:
+            return _SEG_ORDER.index(seg)
+        except ValueError:
+            return len(_SEG_ORDER)
+
+    sorted_clips = sorted(
+        job.clips,
+        key=lambda c: (
+            seg_index(c.segment_label or "Backup"),
+            c.scores.sequence_position if c.scores.sequence_position is not None else 1_000_000,
+            c.path.lower(),
+        ),
+    )
+
+    for i, c in enumerate(sorted_clips, start=1):
+        s = c.scores
+        words_payload = []
+        for w in (s.words or []):
+            if w.speaker_tag:
+                detected_speakers.add(w.speaker_tag)
+            words_payload.append({
+                "word": w.word,
+                "start_sec": w.start_sec,
+                "end_sec": w.end_sec,
+                "speaker_tag": w.speaker_tag,
+            })
+        items.append({
+            "clip_id": c.clip_id,
+            "filename": c.filename,
+            "segment": c.segment_label,
+            "clip_type": s.clip_type,
+            "duration_sec": s.duration_sec,
+            "ai_in_sec": s.ai_in_sec,
+            "ai_out_sec": s.ai_out_sec,
+            "ai_quality": s.ai_quality,
+            "ai_caption": s.ai_caption,
+            "transcript": s.transcript,
+            "words": words_payload,
+            "sequence_position": s.sequence_position,
+            "placement_confidence": s.placement_confidence,
+            "approved": c.approved,
+            "rank_in_group": s.rank_in_group,
+            "thumbnail_url": f"/thumbnails/{c.clip_id}",
+            "stream_url": f"/clips/{job.id}/{c.clip_id}",
+            "timeline_position": i,
+        })
+
+    return {
+        "job_id": job.id,
+        "speaker_tags": sorted(detected_speakers),
+        "speaker_names": job.speaker_names,
+        "items": items,
+    }
 
 
 # ─────────────────────────── Bulk auto-approve ───────────────────────────────

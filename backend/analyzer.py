@@ -431,7 +431,12 @@ def _run_ai_pipeline(
         ]
         word_dicts = vi_result.get("words") or []
         scores.words = [
-            WordInfo(word=w["word"], start_sec=w["start_sec"], end_sec=w["end_sec"])
+            WordInfo(
+                word=w["word"],
+                start_sec=w["start_sec"],
+                end_sec=w["end_sec"],
+                speaker_tag=w.get("speaker_tag"),
+            )
             for w in word_dicts
         ]
 
@@ -449,6 +454,7 @@ def _run_ai_pipeline(
                         word=w["word"],
                         start_sec=w["start_sec"],
                         end_sec=w["end_sec"],
+                        speaker_tag=w.get("speaker_tag"),
                     )
                     for w in wh["words"]
                 ]
@@ -486,6 +492,10 @@ def _run_ai_pipeline(
         scores.ai_in_sec = float(in_s) if isinstance(in_s, (int, float)) else None
         scores.ai_out_sec = float(out_s) if isinstance(out_s, (int, float)) else None
 
+    # ─── Clip type classification (AROLL vs BROLL) ────────────────────────
+    # AROLL = clip with usable dialogue. BROLL = no dialogue, scenic/ambient.
+    scores.clip_type = "AROLL" if (scores.words and len(scores.words) >= 3) else "BROLL"
+
     # ─── Dialogue-aware trim takes precedence when speech is present ──────
     # Pure-python: Gemini eyeballs in/out from frames, but speech timestamps
     # are exact. Never cut mid-sentence.
@@ -500,8 +510,8 @@ def _run_ai_pipeline(
             scores.ai_in_sec, scores.ai_out_sec = trim
             scores.dialogue_trimmed = True
             logger.info(
-                "Dialogue trim %s: %.2fs–%.2fs (%d words)",
-                fname, trim[0], trim[1], len(scores.words),
+                "Dialogue trim %s [%s]: %.2fs–%.2fs (%d words)",
+                fname, scores.clip_type, trim[0], trim[1], len(scores.words),
             )
 
     return scores

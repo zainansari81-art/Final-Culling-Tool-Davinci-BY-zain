@@ -102,17 +102,23 @@ def rerank_job(clip_reviews: List[Any]) -> int:
             ordered = sorted(group, key=_filename_sort_key)
             for i, c in enumerate(ordered, start=1):
                 c.scores.sequence_position = i
+                # Filename order on dialogue is high-confidence
+                c.scores.placement_confidence = 90.0
         else:
             logger.info(
                 "Gemini sequence: %s (%d/%d have dialogue)",
                 segment, with_dialogue, len(group),
             )
-            seq_order = vertex_gemini.order_segment(segment, payload)
-            if seq_order:
-                seq_by_id = {cid: i + 1 for i, cid in enumerate(seq_order)}
-                last = len(seq_order) + 1
+            items = vertex_gemini.order_segment(segment, payload)
+            if items:
+                pos_by_id = {it["clip_id"]: (i + 1, it["confidence"]) for i, it in enumerate(items)}
+                last = len(items) + 1
                 for c in group:
-                    c.scores.sequence_position = seq_by_id.get(c.clip_id, last)
+                    if c.clip_id in pos_by_id:
+                        c.scores.sequence_position, c.scores.placement_confidence = pos_by_id[c.clip_id]
+                    else:
+                        c.scores.sequence_position = last
+                        c.scores.placement_confidence = 0.0
             else:
                 logger.warning(
                     "Gemini sequence failed for %s — falling back to filename order",
@@ -121,6 +127,7 @@ def rerank_job(clip_reviews: List[Any]) -> int:
                 ordered = sorted(group, key=_filename_sort_key)
                 for i, c in enumerate(ordered, start=1):
                     c.scores.sequence_position = i
+                    c.scores.placement_confidence = 50.0
 
         processed_groups += 1
 

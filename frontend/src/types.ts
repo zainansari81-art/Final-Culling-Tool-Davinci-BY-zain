@@ -50,6 +50,9 @@ export interface UpdateClipRequest {
   approved?: boolean | null
   suggested_segment?: string
   reject_reason?: string | null
+  sequence_position?: number
+  ai_in_sec?: number
+  ai_out_sec?: number
 }
 
 export interface ExportRequest {

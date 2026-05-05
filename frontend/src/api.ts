@@ -62,6 +62,41 @@ export interface FsListResponse {
   video_count: number
 }
 
+export interface SequenceWord {
+  word: string
+  start_sec: number
+  end_sec: number
+  speaker_tag: number | null
+}
+
+export interface SequenceItem {
+  clip_id: string
+  filename: string
+  segment: string
+  clip_type: 'AROLL' | 'BROLL'
+  duration_sec: number
+  ai_in_sec: number | null
+  ai_out_sec: number | null
+  ai_quality: number | null
+  ai_caption: string | null
+  transcript: string | null
+  words: SequenceWord[]
+  sequence_position: number | null
+  placement_confidence: number | null
+  approved: boolean | null
+  rank_in_group: number | null
+  thumbnail_url: string
+  stream_url: string
+  timeline_position: number
+}
+
+export interface SequenceResponse {
+  job_id: string
+  speaker_tags: number[]
+  speaker_names: Record<string, string>
+  items: SequenceItem[]
+}
+
 export const api = {
   fsList: (path?: string): Promise<FsListResponse> =>
     client.get('/fs/list', { params: path ? { path } : {} }).then((r) => r.data),
@@ -86,10 +121,21 @@ export const api = {
     client
       .patch(`/jobs/${jobId}/clips/${clipId}`, {
         approved: patch.approved,
-        // UI stores field as suggested_segment; backend field name is segment_label
         segment_label: patch.suggested_segment,
+        sequence_position: patch.sequence_position,
+        ai_in_sec: patch.ai_in_sec,
+        ai_out_sec: patch.ai_out_sec,
       })
       .then((r) => toClipResult(r.data)),
+
+  getSequence: (jobId: string): Promise<SequenceResponse> =>
+    client.get(`/jobs/${jobId}/sequence`).then((r) => r.data),
+
+  getSpeakers: (jobId: string): Promise<Record<string, string>> =>
+    client.get(`/jobs/${jobId}/speakers`).then((r) => r.data),
+
+  putSpeakers: (jobId: string, names: Record<string, string>): Promise<Record<string, string>> =>
+    client.put(`/jobs/${jobId}/speakers`, { speaker_names: names }).then((r) => r.data),
 
   approveAll: (jobId: string): Promise<{ approved: number; rejected: number; total: number }> =>
     client.post(`/jobs/${jobId}/approve-all`).then((r) => r.data),

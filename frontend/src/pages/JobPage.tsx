@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Clapperboard,
   Download,
+  ListOrdered,
   Sparkles,
 } from 'lucide-react'
 import { api } from '../api'
@@ -284,6 +285,12 @@ export default function JobPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link to={`/jobs/${id}/sequence`}>
+                <ListOrdered className="h-3.5 w-3.5" />
+                Sequence
+              </Link>
+            </Button>
             {approveAllState === 'done' ? (
               <Badge
                 variant="secondary"
