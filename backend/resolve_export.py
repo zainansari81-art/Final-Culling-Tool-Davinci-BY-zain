@@ -88,12 +88,18 @@ def _load_resolve():
 
 
 def _approved_by_segment(job: AnalysisJob) -> Dict[str, List[ClipReview]]:
-    """Return {segment_label: [clip, ...]} for approved clips only."""
+    """Return {segment_label: [clip, ...]} for approved clips only,
+    ordered by AI narrative sequence within each segment."""
     groups: Dict[str, List[ClipReview]] = {}
     for clip in job.clips:
         if clip.approved:
             seg = clip.segment_label or "Backup"
             groups.setdefault(seg, []).append(clip)
+    for seg, clips in groups.items():
+        clips.sort(key=lambda c: (
+            c.scores.sequence_position if c.scores.sequence_position is not None else 1_000_000,
+            c.path.lower(),
+        ))
     return groups
 
 
@@ -185,10 +191,14 @@ def export_to_resolve(job: AnalysisJob, project_name: str) -> Dict[str, object]:
     if timeline is None:
         logger.warning("Could not create 'Selects' timeline.")
     else:
+        timeline_cursor_frames = 0
+        timeline_fps = _timeline_fps(timeline)
+
         for segment in (
             [s for s in SEGMENT_ORDER if s in pairs_by_segment]
             + [s for s in pairs_by_segment if s not in SEGMENT_ORDER]
         ):
+            seg_color = SEGMENT_COLORS.get(segment, "Sand")
             for clip_review, mp_item in pairs_by_segment.get(segment, []):
                 if mp_item is None:
                     continue
@@ -200,13 +210,38 @@ def export_to_resolve(job: AnalysisJob, project_name: str) -> Dict[str, object]:
                         out_frame = max(
                             in_frame + 1, int(round(s.ai_out_sec * fps)),
                         )
+                        clip_dur_sec = max(0.04, s.ai_out_sec - s.ai_in_sec)
                         media_pool.AppendToTimeline([{
                             "mediaPoolItem": mp_item,
                             "startFrame": in_frame,
                             "endFrame": out_frame,
                         }])
                     else:
+                        clip_dur_sec = max(0.04, s.duration_sec or 0.0)
                         media_pool.AppendToTimeline([mp_item])
+
+                    # Drop a marker on the timeline at this clip's start so
+                    # the editor sees segment + caption inline.
+                    caption = (
+                        s.ai_caption
+                        or s.ai_moment
+                        or clip_review.filename
+                    )
+                    label = f"{segment} · {caption}"[:120]
+                    note = caption
+                    try:
+                        timeline.AddMarker(
+                            timeline_cursor_frames,
+                            seg_color,
+                            label,
+                            note,
+                            1,
+                            "",  # customColor (empty = use named)
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("AddMarker failed: %s", exc)
+
+                    timeline_cursor_frames += int(round(clip_dur_sec * timeline_fps))
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("AppendToTimeline failed: %s", exc)
 
@@ -228,3 +263,14 @@ def _clip_fps(mp_item) -> float:
     except Exception:  # noqa: BLE001
         pass
     return 24.0  # safe default
+
+
+def _timeline_fps(timeline) -> float:
+    """Best-effort frame-rate read from a Resolve Timeline."""
+    try:
+        setting = timeline.GetSetting("timelineFrameRate")
+        if setting:
+            return float(setting)
+    except Exception:  # noqa: BLE001
+        pass
+    return 24.0

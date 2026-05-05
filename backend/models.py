@@ -33,6 +33,13 @@ class LabelInfo(BaseModel):
     end_sec: float = 0.0
 
 
+class WordInfo(BaseModel):
+    """One transcribed word with its time range in the clip."""
+    word: str
+    start_sec: float
+    end_sec: float
+
+
 class ClipScore(BaseModel):
     """Raw quality metrics computed by the analysis engine for one video clip."""
     path: str
@@ -56,9 +63,12 @@ class ClipScore(BaseModel):
     ai_in_sec: Optional[float] = None             # suggested in-point
     ai_out_sec: Optional[float] = None            # suggested out-point
     transcript: Optional[str] = None              # speech-to-text
+    words: List[WordInfo] = Field(default_factory=list)  # word-level timestamps
     shots: List[ShotInfo] = Field(default_factory=list)
     labels: List[LabelInfo] = Field(default_factory=list)
-    rank_in_group: Optional[int] = None           # 1 = best within ai_segment (NIM)
+    rank_in_group: Optional[int] = None           # 1 = best within ai_segment
+    sequence_position: Optional[int] = None       # 1-based narrative order
+    dialogue_trimmed: bool = False                # in/out came from speech
 
 
 class ClipReview(BaseModel):

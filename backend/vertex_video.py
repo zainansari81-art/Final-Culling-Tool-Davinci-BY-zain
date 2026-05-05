@@ -164,13 +164,24 @@ def _flatten_response(response) -> Dict[str, Any]:
     labels.sort(key=lambda x: x["confidence"], reverse=True)
     labels = labels[:25]
 
-    # Transcript — concatenate all alternatives
+    # Transcript — concatenate all alternatives + collect word timestamps
     transcript_parts: List[str] = []
+    words: List[Dict[str, Any]] = []
     for tr in (result.speech_transcriptions or []):
         for alt in (tr.alternatives or []):
             if alt.transcript:
                 transcript_parts.append(alt.transcript.strip())
+            for w in (alt.words or []):
+                token = (w.word or "").strip()
+                if not token:
+                    continue
+                words.append({
+                    "word": token,
+                    "start_sec": _ts(w.start_time),
+                    "end_sec": _ts(w.end_time),
+                })
     transcript = " ".join(transcript_parts).strip()
+    words.sort(key=lambda x: x["start_sec"])
 
     # Person tracks count (cheap proxy for "how many people in the shot")
     person_tracks = len(result.person_detection_annotations or [])
@@ -179,6 +190,7 @@ def _flatten_response(response) -> Dict[str, Any]:
         "shots": shots,
         "labels": labels,
         "transcript": transcript,
+        "words": words,
         "person_tracks": person_tracks,
     }
 

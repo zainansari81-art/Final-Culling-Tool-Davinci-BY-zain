@@ -21,7 +21,15 @@ import imagehash
 import numpy as np
 from PIL import Image
 
-from models import AnalysisJob, ClipReview, ClipScore, JobStatus, LabelInfo, ShotInfo
+from models import (
+    AnalysisJob,
+    ClipReview,
+    ClipScore,
+    JobStatus,
+    LabelInfo,
+    ShotInfo,
+    WordInfo,
+)
 
 
 def _ai_enabled() -> bool:
@@ -412,6 +420,11 @@ def _run_ai_pipeline(
             )
             for l in vi_result.get("labels", [])
         ]
+        word_dicts = vi_result.get("words") or []
+        scores.words = [
+            WordInfo(word=w["word"], start_sec=w["start_sec"], end_sec=w["end_sec"])
+            for w in word_dicts
+        ]
 
     logger.info("AI: Gemini synthesis for %s", fname)
     decision = vertex_gemini.synthesize(
@@ -437,6 +450,24 @@ def _run_ai_pipeline(
         out_s = decision.get("out_sec")
         scores.ai_in_sec = float(in_s) if isinstance(in_s, (int, float)) else None
         scores.ai_out_sec = float(out_s) if isinstance(out_s, (int, float)) else None
+
+    # ─── Dialogue-aware trim takes precedence when speech is present ──────
+    # Pure-python: Gemini eyeballs in/out from frames, but speech timestamps
+    # are exact. Never cut mid-sentence.
+    if scores.words:
+        import dialogue_trim
+        word_dicts = [
+            {"word": w.word, "start_sec": w.start_sec, "end_sec": w.end_sec}
+            for w in scores.words
+        ]
+        trim = dialogue_trim.trim_to_dialogue(word_dicts, duration_sec)
+        if trim is not None:
+            scores.ai_in_sec, scores.ai_out_sec = trim
+            scores.dialogue_trimmed = True
+            logger.info(
+                "Dialogue trim %s: %.2fs–%.2fs (%d words)",
+                fname, trim[0], trim[1], len(scores.words),
+            )
 
     return scores
 
@@ -555,6 +586,11 @@ def analyze_folder(
                 clip.scores.duplicate_of = dup_target
                 dup_count += 1
         logger.info("Found %d duplicate(s)", dup_count)
+
+        # ── Restore deterministic order ────────────────────────────────────
+        # ThreadPoolExecutor as_completed() yields results out of order; sort
+        # by source path so C0001.MP4 comes before C0010.MP4 by default.
+        clip_results.sort(key=lambda c: c.path.lower())
 
         # ── Cross-clip ranking via Gemini on Vertex (AI-only) ─────────────
         if _ai_enabled():

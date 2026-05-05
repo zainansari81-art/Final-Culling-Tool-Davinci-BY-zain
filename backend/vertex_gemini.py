@@ -212,12 +212,46 @@ def _format_clip_for_rank(c: Dict[str, Any]) -> str:
 
 def rerank_segment(segment: str, clips: List[Dict[str, Any]]) -> Optional[List[str]]:
     """Ask Gemini to rank clips within one segment. Returns ordered clip_ids."""
+    return _ask_for_order(_RERANK_PROMPT, segment, clips)
+
+
+# ─── Narrative sequence ordering ────────────────────────────────────────────
+
+_SEQUENCE_PROMPT = """You are a senior wedding videography editor sequencing
+clips for a final-cut timeline. Order the clips below into the most natural
+narrative flow inside this segment.
+
+Heuristics:
+- Wide/establishing shots usually come first
+- Action progresses toward the central moment (walking → entering → arriving)
+- Reactions follow the action that caused them
+- Dialogue clips chain in story-logical order, not by quality
+- Place duplicates / lesser takes after the primary one
+
+Segment: {segment}
+
+Clips:
+{clips_text}
+
+Respond with ONLY this JSON, nothing else:
+{{ "order": ["<clip_id_first>", ..., "<clip_id_last>"] }}
+"""
+
+
+def order_segment(segment: str, clips: List[Dict[str, Any]]) -> Optional[List[str]]:
+    """Ask Gemini to order clips for narrative flow within a segment."""
+    return _ask_for_order(_SEQUENCE_PROMPT, segment, clips)
+
+
+def _ask_for_order(
+    prompt_tmpl: str, segment: str, clips: List[Dict[str, Any]],
+) -> Optional[List[str]]:
     from google.genai import types
 
     if len(clips) < 2:
         return [c["clip_id"] for c in clips] if clips else None
 
-    prompt = _RERANK_PROMPT.format(
+    prompt = prompt_tmpl.format(
         segment=segment,
         clips_text="\n\n".join(_format_clip_for_rank(c) for c in clips),
     )
@@ -234,7 +268,7 @@ def rerank_segment(segment: str, clips: List[Dict[str, Any]]) -> Optional[List[s
             ),
         )
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Gemini rerank failed for %s: %s", segment, exc)
+        logger.exception("Gemini order request failed for %s: %s", segment, exc)
         return None
 
     text = (resp.text or "").strip()
