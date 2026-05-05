@@ -443,7 +443,7 @@ def get_sequence(job_id: str) -> Dict[str, Any]:
             "placement_confidence": s.placement_confidence,
             "approved": c.approved,
             "rank_in_group": s.rank_in_group,
-            "thumbnail_url": f"/thumbnails/{c.clip_id}",
+            "thumbnail_url": f"/thumbnails/{job.id}/{c.clip_id}",
             "stream_url": f"/clips/{job.id}/{c.clip_id}",
             "timeline_position": i,
         })
