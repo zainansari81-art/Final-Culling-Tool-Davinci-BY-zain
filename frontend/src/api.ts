@@ -26,6 +26,16 @@ function toClipResult(raw: any): ClipResult {
     suggested_segment: raw.segment_label ?? raw.suggested_segment ?? 'Backup',
     approved: raw.approved ?? null,
     reject_reason: null,
+    ai_caption: scores.ai_caption ?? null,
+    ai_moment: scores.ai_moment ?? null,
+    ai_quality: scores.ai_quality ?? null,
+    ai_subjects: scores.ai_subjects ?? [],
+    ai_in_sec: scores.ai_in_sec ?? null,
+    ai_out_sec: scores.ai_out_sec ?? null,
+    ai_skip: scores.ai_skip ?? false,
+    ai_skip_reason: scores.ai_skip_reason ?? null,
+    transcript: scores.transcript ?? null,
+    rank_in_group: scores.rank_in_group ?? null,
   }
 }
 

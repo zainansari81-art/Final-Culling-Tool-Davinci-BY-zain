@@ -8,3 +8,7 @@ Pillow
 numpy
 aiofiles
 python-multipart
+google-cloud-videointelligence
+google-cloud-storage
+google-cloud-aiplatform
+google-genai

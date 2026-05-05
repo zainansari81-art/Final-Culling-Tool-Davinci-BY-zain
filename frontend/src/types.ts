@@ -14,6 +14,17 @@ export interface ClipResult {
   suggested_segment: string
   approved: boolean | null
   reject_reason: string | null
+  // AI-derived
+  ai_caption?: string | null
+  ai_moment?: string | null
+  ai_quality?: number | null
+  ai_subjects?: string[]
+  ai_in_sec?: number | null
+  ai_out_sec?: number | null
+  ai_skip?: boolean
+  ai_skip_reason?: string | null
+  transcript?: string | null
+  rank_in_group?: number | null
 }
 
 export interface AnalysisJob {
@@ -29,6 +40,7 @@ export interface AnalysisJob {
 export interface CreateJobRequest {
   folder_path: string
   included_files?: string[]
+  enable_ai?: boolean
 }
 
 export interface UpdateClipRequest {

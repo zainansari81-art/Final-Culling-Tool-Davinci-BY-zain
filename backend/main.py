@@ -84,7 +84,12 @@ class JobLogHandler(logging.Handler):
         job_logs[self.job_id].append(line)
 
 
-def _run_job(job_id: str, folder_path: str, included_files: List[str] | None) -> None:
+def _run_job(
+    job_id: str,
+    folder_path: str,
+    included_files: List[str] | None,
+    enable_ai: bool = False,
+) -> None:
     """Wrapper that attaches a per-job log handler before running analysis."""
     handler = JobLogHandler(job_id)
     handler.setLevel(logging.INFO)
@@ -92,10 +97,21 @@ def _run_job(job_id: str, folder_path: str, included_files: List[str] | None) ->
     analyzer_logger.addHandler(handler)
     job_logs[job_id].append(
         f"{datetime.now().strftime('%H:%M:%S')} I Job started for {folder_path}"
+        f"{' (AI on)' if enable_ai else ''}"
     )
+    # Set ENABLE_AI for this thread tree via env so analyzer.py picks it up.
+    import os as _os
+    prev = _os.environ.get("ENABLE_AI")
+    if enable_ai:
+        _os.environ["ENABLE_AI"] = "1"
     try:
         analyze_folder(job_id, folder_path, jobs, included_files)
     finally:
+        if enable_ai:
+            if prev is None:
+                _os.environ.pop("ENABLE_AI", None)
+            else:
+                _os.environ["ENABLE_AI"] = prev
         analyzer_logger.removeHandler(handler)
         job_logs[job_id].append(
             f"{datetime.now().strftime('%H:%M:%S')} I Job finished"
@@ -151,7 +167,7 @@ def create_job(body: CreateJobRequest) -> AnalysisJob:
     jobs[job.id] = job
 
     _executor.submit(
-        _run_job, job.id, job.folder_path, body.included_files,
+        _run_job, job.id, job.folder_path, body.included_files, body.enable_ai,
     )
     logger.info(
         "Created job %s for %s (included_files=%s)",
@@ -289,7 +305,19 @@ def approve_all(job_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="Job not found")
     approved = rejected = 0
     for clip in job.clips:
-        good = clip.scores.shake_score < 0.4 and clip.scores.blur_score < 0.4 and clip.scores.exposure_ok
+        s = clip.scores
+        # AI is authoritative when it ran. Heuristics often misjudge cinematic
+        # footage (gimbal moves register as "shaky", shallow DoF as "blurry"),
+        # so we trust Gemini's quality + skip when present.
+        if s.ai_quality is not None:
+            good = (not s.ai_skip) and (s.ai_quality >= 5.0)
+        else:
+            # Looser fallback thresholds when AI didn't run
+            good = (
+                s.shake_score < 0.5
+                and s.blur_score < 0.85
+                and s.exposure_ok
+            )
         clip.approved = good
         if good:
             approved += 1

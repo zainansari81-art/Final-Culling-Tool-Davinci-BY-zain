@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Copy, Eye, Play, Wind, X } from 'lucide-react'
+import { Check, Copy, Eye, Play, Sparkles, Wind, X } from 'lucide-react'
 import { api } from '../api'
 import { SEGMENTS } from '../constants'
 import type { ClipResult, UpdateClipRequest } from '../types'
@@ -33,9 +33,12 @@ export default function ClipCard({
   const [previewOpen, setPreviewOpen] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
 
-  const isShaky = clip.shake_score > 0.15
-  const isBlurry = clip.blur_score > 0.7
-  const exposureBad = clip.exposure_score < 0.2 || clip.exposure_score > 0.9
+  // When AI rated the clip well, suppress noisy heuristic flags. Cinematic
+  // shots (gimbal pushes, shallow DoF) trip these false positives.
+  const aiTrust = (clip.ai_quality ?? 0) >= 7
+  const isShaky = !aiTrust && clip.shake_score > 0.35
+  const isBlurry = !aiTrust && clip.blur_score > 0.85
+  const exposureBad = !aiTrust && (clip.exposure_score < 0.2 || clip.exposure_score > 0.9)
 
   const patch = async (payload: UpdateClipRequest) => {
     try {
@@ -156,12 +159,44 @@ export default function ClipCard({
             <Check className="h-3.5 w-3.5" />
           </div>
         )}
+        {clip.rank_in_group === 1 && clip.approved !== true && (
+          <Badge
+            className="absolute right-2 top-2 gap-1 border-0 bg-foreground/95 text-background"
+            title="Top take in its segment (NIM rerank)"
+          >
+            #1
+          </Badge>
+        )}
       </button>
 
       <div className="flex flex-col gap-2.5 p-3">
-        <div className="truncate text-xs font-medium" title={clip.filename}>
-          {clip.filename}
+        <div className="flex items-center gap-1.5">
+          <div
+            className="min-w-0 flex-1 truncate text-xs font-medium"
+            title={clip.filename}
+          >
+            {clip.filename}
+          </div>
+          {clip.ai_quality != null && (
+            <Badge
+              variant="secondary"
+              className="h-5 shrink-0 gap-1 px-1.5 text-[10px]"
+              title={`AI quality ${clip.ai_quality.toFixed(1)}/10`}
+            >
+              <Sparkles className="h-2.5 w-2.5" />
+              {clip.ai_quality.toFixed(1)}
+            </Badge>
+          )}
         </div>
+
+        {clip.ai_caption && (
+          <p
+            className="line-clamp-2 text-[11px] leading-snug text-muted-foreground"
+            title={clip.ai_caption}
+          >
+            {clip.ai_caption}
+          </p>
+        )}
 
         <select
           className="h-7 rounded-md border border-border bg-input px-2 text-xs outline-none transition-colors focus:border-ring"
