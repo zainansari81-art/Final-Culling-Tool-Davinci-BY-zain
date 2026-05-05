@@ -58,6 +58,7 @@ class ClipScore(BaseModel):
     transcript: Optional[str] = None              # speech-to-text
     shots: List[ShotInfo] = Field(default_factory=list)
     labels: List[LabelInfo] = Field(default_factory=list)
+    rank_in_group: Optional[int] = None           # 1 = best within ai_segment (NIM)
 
 
 class ClipReview(BaseModel):

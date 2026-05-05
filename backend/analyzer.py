@@ -556,6 +556,20 @@ def analyze_folder(
                 dup_count += 1
         logger.info("Found %d duplicate(s)", dup_count)
 
+        # ── Cross-clip ranking via NIM (optional, AI-only) ────────────────
+        if _ai_enabled():
+            try:
+                import nim_rerank
+                if nim_rerank.is_enabled():
+                    job.progress = 98.0
+                    jobs_store[job_id] = job
+                    n = nim_rerank.rerank_job(clip_results)
+                    logger.info("NIM ranked %d segment group(s)", n)
+                else:
+                    logger.info("NIM_API_KEY not set; skipping rerank")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("NIM rerank failed: %s", exc)
+
         job.clips = clip_results
         job.status = JobStatus.done
         job.progress = 100.0

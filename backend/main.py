@@ -305,7 +305,19 @@ def approve_all(job_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="Job not found")
     approved = rejected = 0
     for clip in job.clips:
-        good = clip.scores.shake_score < 0.4 and clip.scores.blur_score < 0.4 and clip.scores.exposure_ok
+        s = clip.scores
+        # AI is authoritative when it ran. Heuristics often misjudge cinematic
+        # footage (gimbal moves register as "shaky", shallow DoF as "blurry"),
+        # so we trust Gemini's quality + skip when present.
+        if s.ai_quality is not None:
+            good = (not s.ai_skip) and (s.ai_quality >= 5.0)
+        else:
+            # Looser fallback thresholds when AI didn't run
+            good = (
+                s.shake_score < 0.5
+                and s.blur_score < 0.85
+                and s.exposure_ok
+            )
         clip.approved = good
         if good:
             approved += 1

@@ -24,6 +24,7 @@ export interface ClipResult {
   ai_skip?: boolean
   ai_skip_reason?: string | null
   transcript?: string | null
+  rank_in_group?: number | null
 }
 
 export interface AnalysisJob {

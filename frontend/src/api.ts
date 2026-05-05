@@ -35,6 +35,7 @@ function toClipResult(raw: any): ClipResult {
     ai_skip: scores.ai_skip ?? false,
     ai_skip_reason: scores.ai_skip_reason ?? null,
     transcript: scores.transcript ?? null,
+    rank_in_group: scores.rank_in_group ?? null,
   }
 }
 

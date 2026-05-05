@@ -24,29 +24,40 @@ RESOLVE_SCRIPT_PATH = (
 RESOLVE_MODULE_PATH = f"{RESOLVE_SCRIPT_PATH}/Modules"
 
 # ── Segment -> clip colour mapping (Resolve colour names) ───────────────────
+# Includes both new canonical segments (from Vertex AI) and legacy regex labels.
 SEGMENT_COLORS: Dict[str, str] = {
-    "Groomsmen":            "Teal",
-    "Bride Getting Ready":  "Pink",
-    "Drone":                "Green",
-    "Ceremony":             "Blue",
-    "First Look":           "Beige",
-    "First Dance":          "Violet",
-    "Cocktail":             "Tan",
-    "Toasts":               "Purple",
-    "Ambiance":             "Apricot",
-    "Backup":               "Sand",
+    "Groomsmen Getting Ready": "Teal",
+    "Groomsmen":               "Teal",
+    "Bride Getting Ready":     "Pink",
+    "Drone / Aerial":          "Green",
+    "Drone":                   "Green",
+    "Ceremony":                "Blue",
+    "First Look":              "Beige",
+    "Reception / First Dance": "Violet",
+    "First Dance":             "Violet",
+    "Cocktail Hour":           "Tan",
+    "Cocktail":                "Tan",
+    "Toasts":                  "Purple",
+    "Ambiance / BTS":          "Apricot",
+    "Ambiance":                "Apricot",
+    "Backup":                  "Sand",
 }
 
 # Wedding-day chronological ordering used for the Selects timeline
 SEGMENT_ORDER = [
     "Bride Getting Ready",
+    "Groomsmen Getting Ready",
     "Groomsmen",
     "First Look",
     "Ceremony",
+    "Cocktail Hour",
     "Cocktail",
+    "Reception / First Dance",
     "First Dance",
     "Toasts",
+    "Drone / Aerial",
     "Drone",
+    "Ambiance / BTS",
     "Ambiance",
     "Backup",
 ]
@@ -156,16 +167,46 @@ def export_to_resolve(job: AnalysisJob, project_name: str) -> Dict[str, object]:
                 logger.warning("SetClipColor failed: %s", exc)
 
     # ── Selects timeline ───────────────────────────────────────────────────
+    # Uses AI-suggested in/out points when available (subclip on append) so
+    # the editor sees only the keep-portion of each clip. Falls back to full
+    # clips when AI didn't run.
     media_pool.SetCurrentFolder(root_bin)
     timeline = media_pool.CreateEmptyTimeline("Selects")
+
+    # Pair every imported MediaPoolItem with the originating ClipReview so we
+    # can pull AI in/out and the per-clip note when appending.
+    pairs_by_segment: Dict[str, list] = {}
+    for segment, clips in groups.items():
+        items = imported.get(segment, [])
+        # Resolve doesn't guarantee order, but ImportMedia returns in input
+        # order in current versions. Best-effort align by position.
+        pairs_by_segment[segment] = list(zip(clips, items))
 
     if timeline is None:
         logger.warning("Could not create 'Selects' timeline.")
     else:
-        for segment in SEGMENT_ORDER:
-            for rc in imported.get(segment, []):
+        for segment in (
+            [s for s in SEGMENT_ORDER if s in pairs_by_segment]
+            + [s for s in pairs_by_segment if s not in SEGMENT_ORDER]
+        ):
+            for clip_review, mp_item in pairs_by_segment.get(segment, []):
+                if mp_item is None:
+                    continue
                 try:
-                    media_pool.AppendToTimeline([rc])
+                    fps = _clip_fps(mp_item)
+                    s = clip_review.scores
+                    if s.ai_in_sec is not None and s.ai_out_sec is not None:
+                        in_frame = max(0, int(round(s.ai_in_sec * fps)))
+                        out_frame = max(
+                            in_frame + 1, int(round(s.ai_out_sec * fps)),
+                        )
+                        media_pool.AppendToTimeline([{
+                            "mediaPoolItem": mp_item,
+                            "startFrame": in_frame,
+                            "endFrame": out_frame,
+                        }])
+                    else:
+                        media_pool.AppendToTimeline([mp_item])
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("AppendToTimeline failed: %s", exc)
 
@@ -176,3 +217,14 @@ def export_to_resolve(job: AnalysisJob, project_name: str) -> Dict[str, object]:
         "clips_imported": total_imported,
         "segments": list(groups.keys()),
     }
+
+
+def _clip_fps(mp_item) -> float:
+    """Best-effort frame-rate read from a Resolve MediaPoolItem."""
+    try:
+        fps_raw = mp_item.GetClipProperty("FPS")
+        if fps_raw:
+            return float(fps_raw)
+    except Exception:  # noqa: BLE001
+        pass
+    return 24.0  # safe default

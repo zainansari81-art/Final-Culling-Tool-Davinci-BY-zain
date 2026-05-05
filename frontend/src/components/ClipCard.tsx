@@ -33,9 +33,12 @@ export default function ClipCard({
   const [previewOpen, setPreviewOpen] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
 
-  const isShaky = clip.shake_score > 0.15
-  const isBlurry = clip.blur_score > 0.7
-  const exposureBad = clip.exposure_score < 0.2 || clip.exposure_score > 0.9
+  // When AI rated the clip well, suppress noisy heuristic flags. Cinematic
+  // shots (gimbal pushes, shallow DoF) trip these false positives.
+  const aiTrust = (clip.ai_quality ?? 0) >= 7
+  const isShaky = !aiTrust && clip.shake_score > 0.35
+  const isBlurry = !aiTrust && clip.blur_score > 0.85
+  const exposureBad = !aiTrust && (clip.exposure_score < 0.2 || clip.exposure_score > 0.9)
 
   const patch = async (payload: UpdateClipRequest) => {
     try {
@@ -155,6 +158,14 @@ export default function ClipCard({
           <div className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-success text-success-foreground shadow-sm">
             <Check className="h-3.5 w-3.5" />
           </div>
+        )}
+        {clip.rank_in_group === 1 && clip.approved !== true && (
+          <Badge
+            className="absolute right-2 top-2 gap-1 border-0 bg-foreground/95 text-background"
+            title="Top take in its segment (NIM rerank)"
+          >
+            #1
+          </Badge>
         )}
       </button>
 
