@@ -264,6 +264,58 @@ def get_logs(job_id: str, since: int = 0) -> Dict[str, Any]:
     return {"lines": new_lines, "total": total}
 
 
+@app.get(
+    "/jobs/{job_id}/ai-debug",
+    summary="What did AI extract for this job? Quick visibility into pipeline output.",
+)
+def ai_debug(job_id: str) -> Dict[str, Any]:
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    clips = []
+    n_with_words = 0
+    n_with_seq = 0
+    n_dialogue_trimmed = 0
+    for c in job.clips:
+        s = c.scores
+        word_count = len(s.words or [])
+        if word_count > 0:
+            n_with_words += 1
+        if s.sequence_position is not None:
+            n_with_seq += 1
+        if s.dialogue_trimmed:
+            n_dialogue_trimmed += 1
+        clips.append({
+            "clip_id": c.clip_id,
+            "filename": c.filename,
+            "duration_sec": s.duration_sec,
+            "ai_segment": s.ai_segment,
+            "ai_quality": s.ai_quality,
+            "ai_caption": s.ai_caption,
+            "ai_in_sec": s.ai_in_sec,
+            "ai_out_sec": s.ai_out_sec,
+            "dialogue_trimmed": s.dialogue_trimmed,
+            "word_count": word_count,
+            "transcript_chars": len(s.transcript or ""),
+            "rank_in_group": s.rank_in_group,
+            "sequence_position": s.sequence_position,
+            "approved": c.approved,
+        })
+
+    return {
+        "job_id": job_id,
+        "ai_ran": any(c["ai_quality"] is not None for c in clips),
+        "summary": {
+            "total_clips": len(clips),
+            "clips_with_words": n_with_words,
+            "clips_dialogue_trimmed": n_dialogue_trimmed,
+            "clips_with_sequence_pos": n_with_seq,
+        },
+        "clips": clips,
+    }
+
+
 # ─────────────────────────── Clip updates ────────────────────────────────────
 
 @app.patch(
@@ -392,10 +444,19 @@ def export_fcpxml(job_id: str, body: FcpxmlExportRequest) -> Dict[str, Any]:
 
     try:
         written_path = export_to_fcpxml(job=job, output_path=body.output_path)
+        # Side-write an SRT subtitle file for any NLE
+        srt_path = ""
+        try:
+            from srt_export import export_srt
+            srt_target = str(Path(written_path).with_suffix(".srt"))
+            srt_path = export_srt(job=job, output_path=srt_target)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("SRT export failed (non-fatal): %s", exc)
         return {
             "success": True,
             "export_type": "fcpxml",
             "output_path": written_path,
+            "subtitle_path": srt_path or None,
             "clips_exported": len(approved),
         }
     except Exception as exc:  # noqa: BLE001

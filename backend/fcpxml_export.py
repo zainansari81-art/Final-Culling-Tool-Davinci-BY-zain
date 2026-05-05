@@ -77,11 +77,49 @@ def _safe_id(text: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]", "_", text)[:64]
 
 
-def _text_style(caption: str) -> ET.Element:
-    """Build a <text-style> element wrapping the caption (FCPXML title body)."""
-    style = ET.Element("text-style", ref="ts_caption")
-    style.text = caption
-    return style
+# Caption splitting (mirrors srt_export tunables)
+_WORDS_PER_LINE = 7
+_PAUSE_BREAK_SEC = 0.7
+_MIN_LINE_DUR = 0.8
+_MAX_LINE_DUR = 6.0
+
+
+def _build_clip_captions(words, in_sec: float, out_sec: float) -> List:
+    """Group word timestamps into (offset_sec_in_clip, dur_sec, text) tuples,
+    relative to the clip's trimmed in-point so they line up with the spine.
+    """
+    out: List = []
+    bucket = []
+
+    def flush():
+        if not bucket:
+            return
+        first, last = bucket[0], bucket[-1]
+        text = " ".join(w.word for w in bucket).strip()
+        if not text:
+            return
+        offset = max(0.0, first.start_sec - in_sec)
+        dur = last.end_sec - first.start_sec
+        if dur < _MIN_LINE_DUR:
+            dur = _MIN_LINE_DUR
+        if dur > _MAX_LINE_DUR:
+            dur = _MAX_LINE_DUR
+        out.append((offset, dur, text))
+
+    for w in words:
+        if w.end_sec <= in_sec or w.start_sec >= out_sec:
+            continue
+        if not bucket:
+            bucket.append(w)
+            continue
+        gap = w.start_sec - bucket[-1].end_sec
+        if gap >= _PAUSE_BREAK_SEC or len(bucket) >= _WORDS_PER_LINE:
+            flush()
+            bucket = [w]
+        else:
+            bucket.append(w)
+    flush()
+    return out
 
 
 def _approved_by_segment(job: AnalysisJob) -> Dict[str, List[ClipReview]]:
@@ -177,15 +215,6 @@ def _build_fcpxml(job: AnalysisJob, project_name: str) -> str:
         ET.SubElement(asset, "media-rep",
                       kind="original-media", src=file_url)
 
-    # Title generator effect (Basic Title) — used for caption overlays.
-    # Premiere/FCP both ship with a "Basic Title" generator at this UID.
-    ET.SubElement(
-        resources, "effect",
-        id="r_title",
-        name="Basic Title",
-        uid=".../Titles.localized/Basic Text.localized/Basic Title.localized/Basic Title.moti",
-    )
-
     # ── Library → one event per segment ───────────────────────────────────
     dated_name = f"{project_name}_{date.today().isoformat()}"
     library = ET.SubElement(root, "library")
@@ -262,20 +291,9 @@ def _build_fcpxml(job: AnalysisJob, project_name: str) -> str:
         )
         marker.set("color", SEGMENT_MARKER_COLORS.get(seg, "white"))
 
-        # Caption as a connected title (visible text overlay on timeline)
+        # Caption echo as a marker so the editor sees the AI caption inline
         caption_text = clip.scores.ai_caption or clip.scores.ai_moment
         if caption_text:
-            title = ET.SubElement(
-                clip_elem, "title",
-                ref="r_title",
-                offset="0s",
-                start="0s",
-                duration=_ticks(dur),
-                lane="1",
-                name=(clip.scores.ai_moment or "Caption")[:60],
-            )
-            ET.SubElement(title, "text").append(_text_style(caption_text[:200]))
-            # Marker echo so the caption is also visible without rendering titles
             note_marker = ET.SubElement(
                 clip_elem, "marker",
                 start=_ticks(min(0.5, dur / 2)),
@@ -284,6 +302,27 @@ def _build_fcpxml(job: AnalysisJob, project_name: str) -> str:
                 note=caption_text[:200],
             )
             note_marker.set("color", "blue")
+
+        # Word-timed CEA-608 captions on lane -1 (subtitle track) when speech
+        # was transcribed for this clip. Lines are split on natural pauses /
+        # length cap (mirrors srt_export logic).
+        if clip.scores.words:
+            for cap in _build_clip_captions(
+                words=clip.scores.words, in_sec=in_s, out_sec=out_s,
+            ):
+                cap_offset_sec, cap_dur_sec, text = cap
+                cap_elem = ET.SubElement(
+                    clip_elem, "caption",
+                    lane="-1",
+                    offset=_ticks(cap_offset_sec),
+                    start="0s",
+                    duration=_ticks(cap_dur_sec),
+                    role="iTT?captionFormat=ITT.en-US",
+                )
+                cap_text = ET.SubElement(cap_elem, "text")
+                cap_text.set("placement", "bottom")
+                ts = ET.SubElement(cap_text, "text-style", ref="ts_cap")
+                ts.text = text
 
         current_offset += dur
 

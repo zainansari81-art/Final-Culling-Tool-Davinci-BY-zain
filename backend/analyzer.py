@@ -376,6 +376,15 @@ def analyze_single_clip(file_path: str, job_id: str) -> ClipReview:
     # Prefer AI segment over filename regex when available
     final_segment = scores.ai_segment or suggested_segment
 
+    # Auto-approve based on AI judgement so the timeline isn't empty by
+    # default. User can still flip individual clips in the review UI.
+    if scores.ai_quality is not None:
+        approved_default = (not scores.ai_skip) and scores.ai_quality >= 5.0
+    else:
+        approved_default = (
+            shake_score < 0.5 and blur_score < 0.85 and exposure_ok
+        )
+
     return ClipReview(
         clip_id=clip_id,
         path=file_path,
@@ -383,7 +392,7 @@ def analyze_single_clip(file_path: str, job_id: str) -> ClipReview:
         thumbnail_path=thumbnail_path,
         scores=scores,
         suggested_segment=final_segment,
-        approved=False,
+        approved=approved_default,
         segment_label=final_segment,
     )
 

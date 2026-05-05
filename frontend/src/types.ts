@@ -25,6 +25,9 @@ export interface ClipResult {
   ai_skip_reason?: string | null
   transcript?: string | null
   rank_in_group?: number | null
+  sequence_position?: number | null
+  dialogue_trimmed?: boolean
+  word_count?: number
 }
 
 export interface AnalysisJob {
