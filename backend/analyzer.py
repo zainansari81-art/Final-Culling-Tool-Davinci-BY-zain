@@ -435,6 +435,32 @@ def _run_ai_pipeline(
             for w in word_dicts
         ]
 
+    # ─── Whisper fallback when Vertex didn't transcribe ───────────────────
+    # Common reasons Vertex misses speech: non-English audio, multi-track
+    # source where speech isn't on track 0, heavy music, certain codecs.
+    # Whisper handles all of these much more reliably.
+    if not scores.words:
+        try:
+            import whisper_transcribe
+            wh = whisper_transcribe.transcribe(file_path)
+            if wh and wh.get("words"):
+                scores.words = [
+                    WordInfo(
+                        word=w["word"],
+                        start_sec=w["start_sec"],
+                        end_sec=w["end_sec"],
+                    )
+                    for w in wh["words"]
+                ]
+                if not scores.transcript:
+                    scores.transcript = wh.get("transcript")
+                logger.info(
+                    "Whisper fallback recovered %d words for %s",
+                    len(scores.words), fname,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Whisper fallback failed for %s: %s", fname, exc)
+
     logger.info("AI: Gemini synthesis for %s", fname)
     decision = vertex_gemini.synthesize(
         keyframe_jpeg_paths=ai_keyframes,
