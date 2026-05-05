@@ -12,4 +12,3 @@ google-cloud-videointelligence
 google-cloud-storage
 google-cloud-aiplatform
 google-genai
-requests

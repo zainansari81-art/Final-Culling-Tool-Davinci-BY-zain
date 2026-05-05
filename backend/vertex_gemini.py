@@ -171,3 +171,85 @@ def _parse_json(text: str) -> Optional[Dict[str, Any]]:
                 pass
     logger.warning("Could not parse Gemini JSON: %s", text[:200])
     return None
+
+
+# ─── Cross-clip ranking ────────────────────────────────────────────────────
+
+_RERANK_PROMPT = """You are a senior wedding videography editor.
+The clips below all belong to the same wedding moment / segment.
+Rank them best-to-worst for the final cut, weighing:
+- Cinematic quality (composition, focus, light, motion)
+- Emotional content (faces, reactions, key beats)
+- Cleanliness (no mid-take cuts, no obvious flaws)
+- Distinctness (avoid keeping visually-redundant takes)
+
+Segment: {segment}
+
+Clips:
+{clips_text}
+
+Respond with ONLY this JSON, nothing else:
+{{ "order": ["<clip_id_best>", ..., "<clip_id_worst>"] }}
+"""
+
+
+def _format_clip_for_rank(c: Dict[str, Any]) -> str:
+    parts = [f'- id: "{c["clip_id"]}"', f"  filename: {c.get('filename', '')}"]
+    if c.get("duration_sec"):
+        parts.append(f"  duration: {c['duration_sec']}s")
+    if c.get("ai_quality") is not None:
+        parts.append(f"  ai_quality: {c['ai_quality']}/10")
+    if c.get("ai_caption"):
+        parts.append(f"  caption: {c['ai_caption'][:200]}")
+    if c.get("transcript"):
+        parts.append(f"  transcript: {c['transcript'][:200]}")
+    if c.get("subjects"):
+        parts.append(f"  subjects: {', '.join(c['subjects'])}")
+    parts.append(f"  shake: {c.get('shake_score', 0):.2f}")
+    parts.append(f"  blur: {c.get('blur_score', 0):.2f}")
+    return "\n".join(parts)
+
+
+def rerank_segment(segment: str, clips: List[Dict[str, Any]]) -> Optional[List[str]]:
+    """Ask Gemini to rank clips within one segment. Returns ordered clip_ids."""
+    from google.genai import types
+
+    if len(clips) < 2:
+        return [c["clip_id"] for c in clips] if clips else None
+
+    prompt = _RERANK_PROMPT.format(
+        segment=segment,
+        clips_text="\n\n".join(_format_clip_for_rank(c) for c in clips),
+    )
+
+    try:
+        resp = _client().models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
+            config=types.GenerateContentConfig(
+                temperature=0.2,
+                response_mime_type="application/json",
+                max_output_tokens=2048,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Gemini rerank failed for %s: %s", segment, exc)
+        return None
+
+    text = (resp.text or "").strip()
+    parsed = _parse_json(text)
+    if not parsed:
+        return None
+    order_raw = parsed.get("order") if isinstance(parsed, dict) else parsed
+    if not isinstance(order_raw, list):
+        return None
+
+    valid_ids = {c["clip_id"] for c in clips}
+    seen: set[str] = set()
+    out: List[str] = []
+    for cid in order_raw:
+        if isinstance(cid, str) and cid in valid_ids and cid not in seen:
+            out.append(cid)
+            seen.add(cid)
+    return out or None
