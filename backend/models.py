@@ -18,6 +18,21 @@ class JobStatus(str, Enum):
     failed = "failed"
 
 
+class ShotInfo(BaseModel):
+    """One shot boundary inside a clip (Vertex Video Intelligence)."""
+    start_sec: float
+    end_sec: float
+    label: Optional[str] = None
+
+
+class LabelInfo(BaseModel):
+    """A detected label with confidence and time range."""
+    label: str
+    confidence: float
+    start_sec: float = 0.0
+    end_sec: float = 0.0
+
+
 class ClipScore(BaseModel):
     """Raw quality metrics computed by the analysis engine for one video clip."""
     path: str
@@ -29,6 +44,20 @@ class ClipScore(BaseModel):
     exposure_ok: bool = True
     duplicate_of: Optional[str] = None   # clip_id of original, or None
     scene_count: int = 1
+
+    # ─── AI-derived fields (populated by Vertex pipeline) ──────────────────
+    ai_segment: Optional[str] = None              # Gemini's segment classification
+    ai_moment: Optional[str] = None               # 3-7 word description
+    ai_caption: Optional[str] = None              # human-friendly summary
+    ai_quality: Optional[float] = Field(default=None, ge=0.0, le=10.0)
+    ai_subjects: List[str] = Field(default_factory=list)
+    ai_skip: bool = False                         # Gemini-recommended skip
+    ai_skip_reason: Optional[str] = None
+    ai_in_sec: Optional[float] = None             # suggested in-point
+    ai_out_sec: Optional[float] = None            # suggested out-point
+    transcript: Optional[str] = None              # speech-to-text
+    shots: List[ShotInfo] = Field(default_factory=list)
+    labels: List[LabelInfo] = Field(default_factory=list)
 
 
 class ClipReview(BaseModel):
@@ -57,6 +86,7 @@ class AnalysisJob(BaseModel):
 class CreateJobRequest(BaseModel):
     folder_path: str
     included_files: Optional[List[str]] = None  # absolute paths; if set, only these are analyzed
+    enable_ai: bool = False  # opt-in Vertex AI pipeline (Video Intel + Gemini)
 
 
 class FsEntry(BaseModel):

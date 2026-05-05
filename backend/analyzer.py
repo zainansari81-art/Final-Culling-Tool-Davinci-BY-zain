@@ -21,7 +21,12 @@ import imagehash
 import numpy as np
 from PIL import Image
 
-from models import AnalysisJob, ClipReview, ClipScore, JobStatus
+from models import AnalysisJob, ClipReview, ClipScore, JobStatus, LabelInfo, ShotInfo
+
+
+def _ai_enabled() -> bool:
+    """Read at call time so env changes after import are honored."""
+    return os.environ.get("ENABLE_AI", "0") == "1"
 
 logger = logging.getLogger(__name__)
 
@@ -282,6 +287,29 @@ def save_thumbnail(frame: np.ndarray, job_id: str, clip_id: str) -> str:
     return str(out_path)
 
 
+def save_ai_keyframes(
+    frames: List[np.ndarray], job_id: str, clip_id: str, max_frames: int = 8,
+) -> List[str]:
+    """Save evenly-spaced keyframes at 768px width for Gemini. Returns paths."""
+    if not frames:
+        return []
+    out_dir = THUMBNAILS_ROOT / job_id / "ai" / clip_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths: List[str] = []
+    n = len(frames)
+    step = max(1, n // max_frames)
+    selected = frames[::step][:max_frames]
+    for i, frame in enumerate(selected):
+        h, w = frame.shape[:2]
+        if w > 768:
+            new_h = int(h * (768 / w))
+            frame = cv2.resize(frame, (768, new_h), interpolation=cv2.INTER_AREA)
+        p = out_dir / f"{i:02d}.jpg"
+        cv2.imwrite(str(p), frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        paths.append(str(p))
+    return paths
+
+
 # ─────────────────────────── Per-clip pipeline ──────────────────────────────
 
 def analyze_single_clip(file_path: str, job_id: str) -> ClipReview:
@@ -305,9 +333,12 @@ def analyze_single_clip(file_path: str, job_id: str) -> ClipReview:
 
     # Middle keyframe → thumbnail
     thumbnail_path: Optional[str] = None
+    ai_keyframes: List[str] = []
     if frames:
         mid_frame = frames[len(frames) // 2]
         thumbnail_path = save_thumbnail(mid_frame, job_id, clip_id)
+        if _ai_enabled():
+            ai_keyframes = save_ai_keyframes(frames, job_id, clip_id)
 
     scores = ClipScore(
         path=file_path,
@@ -319,16 +350,95 @@ def analyze_single_clip(file_path: str, job_id: str) -> ClipReview:
         scene_count=scene_count,
     )
 
+    # ─── AI pipeline (opt-in) ────────────────────────────────────────────
+    if _ai_enabled() and ai_keyframes:
+        try:
+            scores = _run_ai_pipeline(
+                file_path=file_path,
+                duration_sec=duration,
+                shake_score=shake_score,
+                blur_score=blur_score,
+                exposure_ok=exposure_ok,
+                ai_keyframes=ai_keyframes,
+                scores=scores,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("AI pipeline failed for %s: %s", filename, exc)
+
+    # Prefer AI segment over filename regex when available
+    final_segment = scores.ai_segment or suggested_segment
+
     return ClipReview(
         clip_id=clip_id,
         path=file_path,
         filename=filename,
         thumbnail_path=thumbnail_path,
         scores=scores,
-        suggested_segment=suggested_segment,
+        suggested_segment=final_segment,
         approved=False,
-        segment_label=suggested_segment,
+        segment_label=final_segment,
     )
+
+
+def _run_ai_pipeline(
+    file_path: str,
+    duration_sec: float,
+    shake_score: float,
+    blur_score: float,
+    exposure_ok: bool,
+    ai_keyframes: List[str],
+    scores: ClipScore,
+) -> ClipScore:
+    """Run Vertex Video Intel + Gemini synthesis. Mutates and returns scores."""
+    import vertex_gemini
+    import vertex_video
+
+    fname = Path(file_path).name
+    logger.info("AI: Vertex Video Intel for %s", fname)
+    vi_result = vertex_video.analyze_local_file(file_path, cleanup=True)
+
+    if vi_result:
+        scores.transcript = vi_result.get("transcript") or None
+        scores.shots = [
+            ShotInfo(start_sec=s["start_sec"], end_sec=s["end_sec"])
+            for s in vi_result.get("shots", [])
+        ]
+        scores.labels = [
+            LabelInfo(
+                label=l["label"],
+                confidence=l["confidence"],
+                start_sec=l["start_sec"],
+                end_sec=l["end_sec"],
+            )
+            for l in vi_result.get("labels", [])
+        ]
+
+    logger.info("AI: Gemini synthesis for %s", fname)
+    decision = vertex_gemini.synthesize(
+        keyframe_jpeg_paths=ai_keyframes,
+        duration_sec=duration_sec,
+        shake_score=shake_score,
+        blur_score=blur_score,
+        exposure_ok=exposure_ok,
+        video_intel=vi_result,
+    )
+
+    if decision:
+        scores.ai_segment = decision.get("segment")
+        scores.ai_moment = decision.get("moment")
+        scores.ai_caption = decision.get("caption")
+        q = decision.get("quality")
+        if isinstance(q, (int, float)):
+            scores.ai_quality = float(q)
+        scores.ai_subjects = list(decision.get("subjects") or [])
+        scores.ai_skip = bool(decision.get("skip", False))
+        scores.ai_skip_reason = decision.get("skip_reason")
+        in_s = decision.get("in_sec")
+        out_s = decision.get("out_sec")
+        scores.ai_in_sec = float(in_s) if isinstance(in_s, (int, float)) else None
+        scores.ai_out_sec = float(out_s) if isinstance(out_s, (int, float)) else None
+
+    return scores
 
 
 # ─────────────────────────── Job runner ─────────────────────────────────────

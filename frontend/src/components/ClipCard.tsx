@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Copy, Eye, Play, Wind, X } from 'lucide-react'
+import { Check, Copy, Eye, Play, Sparkles, Wind, X } from 'lucide-react'
 import { api } from '../api'
 import { SEGMENTS } from '../constants'
 import type { ClipResult, UpdateClipRequest } from '../types'
@@ -159,9 +159,33 @@ export default function ClipCard({
       </button>
 
       <div className="flex flex-col gap-2.5 p-3">
-        <div className="truncate text-xs font-medium" title={clip.filename}>
-          {clip.filename}
+        <div className="flex items-center gap-1.5">
+          <div
+            className="min-w-0 flex-1 truncate text-xs font-medium"
+            title={clip.filename}
+          >
+            {clip.filename}
+          </div>
+          {clip.ai_quality != null && (
+            <Badge
+              variant="secondary"
+              className="h-5 shrink-0 gap-1 px-1.5 text-[10px]"
+              title={`AI quality ${clip.ai_quality.toFixed(1)}/10`}
+            >
+              <Sparkles className="h-2.5 w-2.5" />
+              {clip.ai_quality.toFixed(1)}
+            </Badge>
+          )}
         </div>
+
+        {clip.ai_caption && (
+          <p
+            className="line-clamp-2 text-[11px] leading-snug text-muted-foreground"
+            title={clip.ai_caption}
+          >
+            {clip.ai_caption}
+          </p>
+        )}
 
         <select
           className="h-7 rounded-md border border-border bg-input px-2 text-xs outline-none transition-colors focus:border-ring"
