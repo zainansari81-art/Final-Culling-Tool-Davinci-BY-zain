@@ -378,8 +378,16 @@ def analyze_single_clip(file_path: str, job_id: str) -> ClipReview:
 
     # Auto-approve based on AI judgement so the timeline isn't empty by
     # default. User can still flip individual clips in the review UI.
-    if scores.ai_quality is not None:
-        approved_default = (not scores.ai_skip) and scores.ai_quality >= 5.0
+    # Trust the AI's skip/segment decision over the per-clip quality
+    # number, which Qwen2-VL 2B tends to underestimate. Only quality 0
+    # combined with no useful segment is enough to reject automatically.
+    if scores.ai_segment is not None:
+        ai_quality = scores.ai_quality if scores.ai_quality is not None else 5.0
+        approved_default = (
+            (not scores.ai_skip)
+            and scores.ai_segment != "Backup"
+            and ai_quality >= 3.0
+        )
     else:
         approved_default = (
             shake_score < 0.5 and blur_score < 0.85 and exposure_ok
@@ -499,9 +507,10 @@ def _run_ai_pipeline(
     scores.clip_type = "AROLL" if (scores.words and len(scores.words) >= 3) else "BROLL"
 
     # ─── Dialogue-aware trim takes precedence when speech is present ──────
-    # Pure-python: Gemini eyeballs in/out from frames, but speech timestamps
-    # are exact. Never cut mid-sentence.
-    if scores.words:
+    # Only run on AROLL clips. BROLL with stray background words (TV in the
+    # next room, a single shouted name) would otherwise get clipped to a 2 s
+    # snippet around that noise.
+    if scores.clip_type == "AROLL" and scores.words:
         import dialogue_trim
         word_dicts = [
             {"word": w.word, "start_sec": w.start_sec, "end_sec": w.end_sec}
