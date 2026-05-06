@@ -73,9 +73,11 @@ def _load_model():
     global _model, _processor, _config
     if _model is not None:
         return _model, _processor, _config
+    import download_progress
+    download_progress.install()
     from mlx_vlm import load
     from mlx_vlm.utils import load_config
-    logger.info("local_vlm: loading %s (first call, may download)", LOCAL_VLM_MODEL)
+    logger.info("local_vlm: loading %s (first call, may download ~1.5 GB)", LOCAL_VLM_MODEL)
     _model, _processor = load(LOCAL_VLM_MODEL)
     _config = load_config(LOCAL_VLM_MODEL)
     logger.info("local_vlm: model loaded")

@@ -92,10 +92,12 @@ def _load_clip():
     global _clip
     if _clip is not None:
         return _clip
+    import download_progress
+    download_progress.install()
     import torch
     import open_clip
     device = "mps" if torch.backends.mps.is_available() else "cpu"
-    logger.info("local_video: loading CLIP %s/%s on %s", CLIP_MODEL, CLIP_PRETRAINED, device)
+    logger.info("local_video: loading CLIP %s/%s on %s (first call may download ~600 MB)", CLIP_MODEL, CLIP_PRETRAINED, device)
     model, _, preprocess = open_clip.create_model_and_transforms(
         CLIP_MODEL, pretrained=CLIP_PRETRAINED,
     )
