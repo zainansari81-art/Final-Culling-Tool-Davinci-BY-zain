@@ -71,14 +71,17 @@ CANONICAL_SEGMENT_PROMPTS: Dict[str, List[str]] = {
         "champagne toast at wedding reception",
     ],
     "Drone / Aerial": [
-        "drone aerial view of a wedding venue",
-        "overhead shot of a building from a drone",
+        "outdoor aerial drone shot of a wedding venue from high above",
+        "bird's eye view of a building and surrounding landscape from a drone",
+        "aerial overhead shot of trees and grounds from a drone in flight",
     ],
     "Ambiance / BTS": [
-        "decor and table setting at a wedding",
-        "behind the scenes wedding crew",
-        "candles and floral arrangements",
-        "empty wedding venue",
+        "decor and table setting at a wedding reception",
+        "behind the scenes wedding crew on set",
+        "candles and floral arrangements close up",
+        "empty indoor wedding venue before guests arrive",
+        "close up detail shot of wedding accessories like sunglasses or favors",
+        "indoor wide shot of guests sitting around a table",
     ],
     "Backup": [
         "lens cap or color chart test footage",

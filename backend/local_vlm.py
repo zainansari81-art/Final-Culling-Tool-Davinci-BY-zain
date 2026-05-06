@@ -23,17 +23,32 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("analyzer")
 
-LOCAL_VLM_MODEL = os.environ.get(
-    "LOCAL_VLM_MODEL",
-    "mlx-community/Qwen2-VL-2B-Instruct-4bit",
-)
+def _resolve_default_vlm() -> str:
+    """Use hardware_detect when LOCAL_VLM_MODEL isn't set explicitly."""
+    explicit = os.environ.get("LOCAL_VLM_MODEL", "").strip()
+    if explicit:
+        return explicit
+    try:
+        import hardware_detect
+        profile = hardware_detect.detect()
+        logger.info(
+            "local_vlm: hardware tier=%s chip=%s ram=%dGB → %s",
+            profile.tier, profile.chip, profile.ram_gb, profile.recommended_vlm,
+        )
+        return profile.recommended_vlm
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("hardware_detect failed (%s); using safe default", exc)
+        return "mlx-community/Qwen2.5-VL-3B-Instruct-4bit"
+
+
+LOCAL_VLM_MODEL = _resolve_default_vlm()
 MAX_TOKENS = int(os.environ.get("LOCAL_VLM_MAX_TOKENS", "512"))
 MAX_KEYFRAMES = int(os.environ.get("LOCAL_VLM_MAX_KEYFRAMES", "4"))
 AUDIT_PASS = os.environ.get("LOCAL_VLM_AUDIT", "1") == "1"
 # Trust CLIP segment classification when its top score is at least this far
 # above the runner-up. Qwen2-VL 2B confuses bride/groom prep too often;
 # CLIP zero-shot is the more reliable signal for visual category.
-CLIP_SEGMENT_MARGIN = float(os.environ.get("LOCAL_CLIP_SEG_MARGIN", "0.02"))
+CLIP_SEGMENT_MARGIN = float(os.environ.get("LOCAL_CLIP_SEG_MARGIN", "0.05"))
 
 CANONICAL_SEGMENTS = [
     "Groomsmen Getting Ready",
