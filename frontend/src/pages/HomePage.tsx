@@ -9,7 +9,7 @@ import {
   Sparkles,
   Wand2,
 } from 'lucide-react'
-import { api } from '../api'
+import { api, type AiInfo } from '../api'
 import type { AnalysisJob } from '../types'
 import BackendError from '../components/BackendError'
 import FolderBrowser from '../components/FolderBrowser'
@@ -53,6 +53,7 @@ export default function HomePage() {
   const [selectedCount, setSelectedCount] = useState(0)
   const [activeJob, setActiveJob] = useState<AnalysisJob | null>(null)
   const [enableAi, setEnableAi] = useState(false)
+  const [aiInfo, setAiInfo] = useState<AiInfo | null>(null)
 
   const loadJobs = async () => {
     try {
@@ -68,6 +69,7 @@ export default function HomePage() {
 
   useEffect(() => {
     loadJobs()
+    api.aiInfo().then(setAiInfo).catch(() => setAiInfo(null))
   }, [])
 
   // Poll the active job for progress
@@ -150,12 +152,16 @@ export default function HomePage() {
               Wedding Footage Culler
             </div>
           </div>
-          <Badge variant="secondary" className="gap-1.5 font-normal">
+          <Badge
+            variant="secondary"
+            className="gap-1.5 font-normal"
+            title={aiInfo?.vlm_model ?? undefined}
+          >
             <span className="relative flex h-2 w-2">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success/70 opacity-75" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
             </span>
-            Local
+            {aiInfo?.label ?? 'Backend'}
           </Badge>
         </div>
       </header>
@@ -205,12 +211,28 @@ export default function HomePage() {
                   <div className="flex-1">
                     <div className="flex items-center gap-1.5 text-sm font-medium">
                       <Wand2 className="h-3.5 w-3.5" />
-                      Vertex AI analysis
+                      AI analysis
+                      {aiInfo && (
+                        <Badge variant="outline" className="font-normal">
+                          {aiInfo.label}
+                        </Badge>
+                      )}
                     </div>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      Adds Video Intelligence + Gemini per clip — semantic segment
-                      tagging, captions, quality score, suggested in/out points.
-                      Slower (~30s/clip after upload) and uses your GCP quota.
+                      {aiInfo?.backend === 'local' ? (
+                        <>
+                          Local Qwen2-VL + CLIP per clip — semantic segment tagging,
+                          captions, quality score. Runs entirely on this Mac.
+                          First clip is slower while models load.
+                        </>
+                      ) : (
+                        <>
+                          Vertex Video Intelligence + Gemini per clip — semantic
+                          segment tagging, captions, quality score, suggested
+                          in/out points. Slower (~30s/clip after upload) and uses
+                          your GCP quota.
+                        </>
+                      )}
                     </p>
                   </div>
                 </label>

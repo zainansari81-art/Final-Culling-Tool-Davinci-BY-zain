@@ -127,7 +127,64 @@ def synthesize(
     if not parsed:
         logger.warning("local_vlm: could not parse JSON from VLM output: %s", text[:200])
         return _heuristic_decision(duration_sec, shake_score, blur_score, exposure_ok, video_intel)
-    return parsed
+    return _normalize(parsed)
+
+
+_SEG_LOOKUP = {s.lower(): s for s in CANONICAL_SEGMENTS}
+
+
+def _coerce_segment(raw: Any) -> str:
+    if not isinstance(raw, str):
+        return "Backup"
+    s = raw.strip()
+    if s in CANONICAL_SEGMENTS:
+        return s
+    hit = _SEG_LOOKUP.get(s.lower())
+    if hit:
+        return hit
+    # fuzzy: substring match against canonical
+    sl = s.lower()
+    for canon in CANONICAL_SEGMENTS:
+        if canon.lower() in sl or sl in canon.lower():
+            return canon
+    return "Backup"
+
+
+def _coerce_quality(raw: Any) -> float:
+    try:
+        q = float(raw)
+    except (TypeError, ValueError):
+        return 5.0
+    return max(0.0, min(10.0, q))
+
+
+def _coerce_optional_float(raw: Any) -> Optional[float]:
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_str_list(raw: Any) -> List[str]:
+    if not isinstance(raw, list):
+        return []
+    return [str(x).strip() for x in raw if isinstance(x, (str, int, float)) and str(x).strip()]
+
+
+def _normalize(d: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "segment": _coerce_segment(d.get("segment")),
+        "moment": (str(d["moment"]).strip() if d.get("moment") else None),
+        "caption": (str(d["caption"]).strip() if d.get("caption") else None),
+        "quality": _coerce_quality(d.get("quality")),
+        "subjects": _coerce_str_list(d.get("subjects")),
+        "skip": bool(d.get("skip", False)),
+        "skip_reason": (str(d["skip_reason"]).strip() if d.get("skip_reason") else None),
+        "in_sec": _coerce_optional_float(d.get("in_sec")),
+        "out_sec": _coerce_optional_float(d.get("out_sec")),
+    }
 
 
 def _parse_json(text: str) -> Optional[Dict[str, Any]]:

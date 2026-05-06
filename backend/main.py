@@ -130,6 +130,28 @@ def health_check() -> Dict[str, str]:
     return {"status": "ok", "service": "wedding-culling-tool"}
 
 
+@app.get("/ai/info", summary="Active AI backend info")
+def ai_info() -> Dict[str, Any]:
+    import os as _os
+    import ai_backend
+    backend = ai_backend.BACKEND
+    if backend == "local":
+        return {
+            "backend": "local",
+            "label": "Local (MLX)",
+            "vlm_model": _os.environ.get(
+                "LOCAL_VLM_MODEL", "mlx-community/Qwen2-VL-2B-Instruct-4bit",
+            ),
+            "clip_model": _os.environ.get("LOCAL_CLIP_MODEL", "ViT-B-32"),
+        }
+    return {
+        "backend": "vertex",
+        "label": "Cloud (Vertex)",
+        "vlm_model": _os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+        "clip_model": None,
+    }
+
+
 # ─────────────────────────── Jobs ────────────────────────────────────────────
 
 @app.get(

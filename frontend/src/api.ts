@@ -97,7 +97,17 @@ export interface SequenceResponse {
   items: SequenceItem[]
 }
 
+export interface AiInfo {
+  backend: 'vertex' | 'local'
+  label: string
+  vlm_model: string | null
+  clip_model: string | null
+}
+
 export const api = {
+  aiInfo: (): Promise<AiInfo> =>
+    client.get('/ai/info').then((r) => r.data),
+
   fsList: (path?: string): Promise<FsListResponse> =>
     client.get('/fs/list', { params: path ? { path } : {} }).then((r) => r.data),
 
