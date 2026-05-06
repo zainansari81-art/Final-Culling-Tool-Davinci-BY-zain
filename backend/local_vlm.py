@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -68,30 +69,50 @@ Respond with ONLY valid JSON, no prose, no markdown:
 _model = None
 _processor = None
 _config = None
-_gpu_stream = None
-_vlm_lock = threading.Lock()  # MLX inference is single-stream; serialize calls
 _load_lock = threading.Lock()
+
+# MLX streams are thread-bound. Run ALL VLM work — load + every inference —
+# on a single dedicated thread so the stream stays valid. analyzer worker
+# threads submit a Future and block on the result.
+_vlm_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx-vlm")
+
+
+def _load_model_inthread():
+    global _model, _processor, _config
+    if _model is not None:
+        return
+    import download_progress
+    download_progress.install()
+    from mlx_vlm import load
+    from mlx_vlm.utils import load_config
+    logger.info("local_vlm: loading %s (first call, may download ~1.5 GB)", LOCAL_VLM_MODEL)
+    _model, _processor = load(LOCAL_VLM_MODEL)
+    _config = load_config(LOCAL_VLM_MODEL)
+    logger.info("local_vlm: model loaded")
 
 
 def _load_model():
-    global _model, _processor, _config, _gpu_stream
-    if _model is not None:
-        return _model, _processor, _config, _gpu_stream
+    """Public helper used by the warmup endpoint. Runs the load on the
+    dedicated MLX thread so the model lives on the same thread that will
+    later perform inference."""
     with _load_lock:
-        if _model is not None:
-            return _model, _processor, _config, _gpu_stream
-        import download_progress
-        download_progress.install()
-        import mlx.core as mx
-        from mlx_vlm import load
-        from mlx_vlm.utils import load_config
-        logger.info("local_vlm: loading %s (first call, may download ~1.5 GB)", LOCAL_VLM_MODEL)
-        _model, _processor = load(LOCAL_VLM_MODEL)
-        _config = load_config(LOCAL_VLM_MODEL)
-        # Capture the GPU stream this thread owns; reuse across worker threads.
-        _gpu_stream = mx.default_stream(mx.gpu)
-        logger.info("local_vlm: model loaded (stream=%s)", _gpu_stream)
-    return _model, _processor, _config, _gpu_stream
+        _vlm_executor.submit(_load_model_inthread).result()
+
+
+def _run_inference(prompt: str, images: List[str]) -> str:
+    """Runs on the single MLX worker thread. Loads model on first call."""
+    _load_model_inthread()
+    from mlx_vlm import generate
+    from mlx_vlm.prompt_utils import apply_chat_template
+    formatted = apply_chat_template(_processor, _config, prompt, num_images=len(images))
+    result = generate(
+        _model, _processor, formatted,
+        image=images,
+        max_tokens=MAX_TOKENS,
+        temperature=0.2,
+        verbose=False,
+    )
+    return getattr(result, "text", str(result)).strip()
 
 
 def synthesize(
@@ -119,25 +140,9 @@ def synthesize(
     )
 
     try:
-        import mlx.core as mx
-        from mlx_vlm import generate
-        from mlx_vlm.prompt_utils import apply_chat_template
-        model, processor, config, gpu_stream = _load_model()
-        formatted = apply_chat_template(processor, config, prompt, num_images=len(images))
-        # MLX binds streams to the thread that created them. The analyzer's
-        # ThreadPoolExecutor calls us from arbitrary worker threads, so wrap
-        # generate() in `mx.stream(...)` AND a process-wide lock so all
-        # inference runs against the same stream serially.
-        with _vlm_lock:
-            with mx.stream(gpu_stream):
-                result = generate(
-                    model, processor, formatted,
-                    image=images,
-                    max_tokens=MAX_TOKENS,
-                    temperature=0.2,
-                    verbose=False,
-                )
-        text = getattr(result, "text", str(result)).strip()
+        # Run load + inference on the single dedicated MLX thread so the
+        # stream stays valid for the lifetime of the process.
+        text = _vlm_executor.submit(_run_inference, prompt, images).result()
     except Exception as exc:  # noqa: BLE001
         logger.exception("local_vlm: inference failed: %s", exc)
         return _heuristic_decision(duration_sec, shake_score, blur_score, exposure_ok, video_intel)
