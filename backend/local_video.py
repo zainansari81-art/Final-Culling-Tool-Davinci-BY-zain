@@ -82,6 +82,13 @@ CANONICAL_SEGMENT_PROMPTS: Dict[str, List[str]] = {
         "empty indoor wedding venue before guests arrive",
         "close up detail shot of wedding accessories like sunglasses or favors",
         "indoor wide shot of guests sitting around a table",
+        "outdoor wedding venue exterior with trees and lawn before guests arrive",
+        "establishing shot of an outdoor wedding location with white fence and grass",
+        "wide outdoor scenery shot of a wedding venue grounds",
+        "exterior of a wedding barn or cottage on a green lawn",
+        "wide shot of empty ceremony chairs set up on a lawn",
+        "close up of wedding rings and ring box on a table",
+        "close up of bridal bouquet and flowers",
     ],
     "Backup": [
         "lens cap or color chart test footage",

@@ -96,6 +96,8 @@ class AnalysisJob(BaseModel):
     progress: float = Field(default=0.0, ge=0.0, le=100.0)
     clips: List[ClipReview] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: Optional[datetime] = None         # set when status transitions to running
+    completed_at: Optional[datetime] = None       # set when status transitions to done|failed
     error: Optional[str] = None
     # User-editable mapping of "speaker_1" -> "John" etc.
     speaker_names: dict[str, str] = Field(default_factory=dict)

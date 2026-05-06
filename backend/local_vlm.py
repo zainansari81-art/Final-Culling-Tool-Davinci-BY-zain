@@ -108,9 +108,10 @@ Hints:
 - A SUIT on a hanger, ties, cufflinks, dress shoes laid out → "Groomsmen Getting Ready".
 - People at altar with officiant → "Ceremony".
 - Couple seeing each other for the first time → "First Look".
-- Drone / aerial shot of venue → "Drone / Aerial".
-- Decor, table settings, candles, empty venue, BTS crew → "Ambiance / BTS".
-- Test footage, lens cap, color chart, mic check → "Backup".
+- Drone / aerial shot of venue from clearly above (rooftops, treetops) → "Drone / Aerial".
+- GROUND-LEVEL outdoor venue shots (trees, lawn, fence, exterior, empty ceremony chairs) → "Ambiance / BTS", NOT "Drone / Aerial" and NOT "Ceremony".
+- Indoor decor, table settings, candles, empty venue, BTS crew, ring/bouquet detail → "Ambiance / BTS".
+- Test footage, lens cap, color chart, mic check, totally unusable frames only → "Backup". Do NOT use "Backup" as a fallback for content you can't otherwise classify; pick the closest real segment instead.
 - When in doubt between Getting Ready variants, look at the GARMENT. White gown = bride. Tuxedo/suit = groomsmen.
 
 CAPTION RULES (strict):

@@ -13,6 +13,7 @@ import os
 import re
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -640,6 +641,7 @@ def analyze_folder(
     """
     job = jobs_store[job_id]
     job.status = JobStatus.running
+    job.started_at = datetime.utcnow()
     jobs_store[job_id] = job
 
     try:
@@ -658,6 +660,7 @@ def analyze_folder(
         if total == 0:
             logger.warning("No video files found in %s", folder_path)
             job.status = JobStatus.done
+            job.completed_at = datetime.utcnow()
             job.progress = 100.0
             jobs_store[job_id] = job
             return
@@ -746,6 +749,7 @@ def analyze_folder(
 
         job.clips = clip_results
         job.status = JobStatus.done
+        job.completed_at = datetime.utcnow()
         job.progress = 100.0
         jobs_store[job_id] = job
         logger.info("Done — %d clip(s) processed", len(clip_results))
@@ -753,5 +757,6 @@ def analyze_folder(
     except Exception as exc:  # noqa: BLE001
         logger.exception("Job %s failed: %s", job_id, exc)
         job.status = JobStatus.failed
+        job.completed_at = datetime.utcnow()
         job.error = str(exc)
         jobs_store[job_id] = job

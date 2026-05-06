@@ -39,6 +39,8 @@ export interface AnalysisJob {
   progress: number
   clips: ClipResult[]
   created_at: string
+  started_at?: string | null
+  completed_at?: string | null
   error?: string | null
 }
 

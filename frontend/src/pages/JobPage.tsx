@@ -282,6 +282,32 @@ export default function JobPage() {
                 {stats.rejected}
               </span>
               <span>rejected</span>
+              {(() => {
+                if (!job.started_at) return null
+                const end = job.completed_at
+                  ? new Date(job.completed_at).getTime()
+                  : Date.now()
+                const start = new Date(job.started_at).getTime()
+                const elapsed = Math.max(0, (end - start) / 1000)
+                const m = Math.floor(elapsed / 60)
+                const s = elapsed - m * 60
+                const txt = m > 0 ? `${m}m ${s.toFixed(1)}s` : `${s.toFixed(1)}s`
+                return (
+                  <>
+                    <span>·</span>
+                    <span
+                      className="tabular-nums"
+                      title={
+                        job.completed_at
+                          ? `Total analysis time ${txt}`
+                          : `Running ${txt} so far`
+                      }
+                    >
+                      ⏱ {txt}
+                    </span>
+                  </>
+                )
+              })()}
             </div>
           </div>
           <div className="flex items-center gap-2">
