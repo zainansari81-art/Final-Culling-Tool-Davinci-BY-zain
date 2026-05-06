@@ -381,7 +381,11 @@ def analyze_single_clip(file_path: str, job_id: str) -> ClipReview:
     # Trust the AI's skip/segment decision over the per-clip quality
     # number, which Qwen2-VL 2B tends to underestimate. Only quality 0
     # combined with no useful segment is enough to reject automatically.
-    if scores.ai_segment is not None:
+    # Tiny clips (<2 s) are almost always test footage or a fumbled
+    # record-stop. Reject regardless of AI judgement.
+    if duration < 2.0:
+        approved_default = False
+    elif scores.ai_segment is not None:
         ai_quality = scores.ai_quality if scores.ai_quality is not None else 5.0
         approved_default = (
             (not scores.ai_skip)
@@ -503,8 +507,29 @@ def _run_ai_pipeline(
         scores.ai_out_sec = float(out_s) if isinstance(out_s, (int, float)) else None
 
     # ─── Clip type classification (AROLL vs BROLL) ────────────────────────
-    # AROLL = clip with usable dialogue. BROLL = no dialogue, scenic/ambient.
-    scores.clip_type = "AROLL" if (scores.words and len(scores.words) >= 3) else "BROLL"
+    # AROLL only when speech is genuinely the subject of the clip:
+    #   - the AI segment is a dialogue-driven moment, OR
+    #   - the speech spans ≥40% of the clip duration AND ≥8 words.
+    # Anything else (a B-roll dress shot with one stray background sentence)
+    # stays BROLL so dialogue trim doesn't collapse it to a 2 s window.
+    DIALOGUE_SEGMENTS = {"Ceremony", "Toasts", "Reception / First Dance"}
+    is_dialogue_segment = scores.ai_segment in DIALOGUE_SEGMENTS
+    if scores.words:
+        speech_span = max(w.end_sec for w in scores.words) - min(
+            w.start_sec for w in scores.words
+        )
+        speech_density = speech_span / duration_sec if duration_sec > 0 else 0
+    else:
+        speech_density = 0.0
+    scores.clip_type = (
+        "AROLL"
+        if scores.words
+        and (
+            is_dialogue_segment
+            or (len(scores.words) >= 8 and speech_density >= 0.4)
+        )
+        else "BROLL"
+    )
 
     # ─── Dialogue-aware trim takes precedence when speech is present ──────
     # Only run on AROLL clips. BROLL with stray background words (TV in the

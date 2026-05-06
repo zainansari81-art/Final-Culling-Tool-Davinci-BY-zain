@@ -58,13 +58,24 @@ Hints:
 - Test footage, lens cap, color chart, mic check → "Backup".
 - When in doubt between Getting Ready variants, look at the GARMENT. White gown = bride. Tuxedo/suit = groomsmen.
 
+CAPTION RULES (strict):
+- Describe ONLY what is visibly present in the keyframes.
+- Never invent actions or people. If the frame shows only a dress on a hanger, write
+  "A wedding dress on a hanger" — NOT "the bride is putting on her dress".
+- If no humans are visible, do NOT use the words "bride", "groom", or any other person.
+- Use present tense, max one sentence, ≤15 words.
+
+SUBJECTS RULE: Only list people you can actually see in the keyframes. Empty list is fine.
+
 Visual evidence from CLIP zero-shot: {clip_labels}
-Transcript (may be unrelated background audio): {transcript}
+Transcript (may be unrelated background audio, ignore for visual decisions):
+{transcript}
 Clip duration: {duration_sec} seconds, {n_frames} keyframes shown.
 
 Quality (0-10) should reflect what an editor would see in the keyframes:
 composition, focus, lighting, presence of subjects. Do NOT auto-zero a
 clip just because of camera shake — handheld wedding footage is normal.
+A clean static shot of a beautiful object is 7+, not 3.
 
 Respond with ONLY valid JSON, no prose, no markdown:
 {{"segment":"<one of canonical>","moment":"<3-7 words>","caption":"<one sentence>","quality":<0-10>,"subjects":["..."],"skip":<true|false>,"skip_reason":"<reason or null>","in_sec":<number or null>,"out_sec":<number or null>}}
