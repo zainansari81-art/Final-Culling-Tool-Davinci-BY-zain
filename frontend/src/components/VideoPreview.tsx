@@ -49,9 +49,12 @@ export default function VideoPreview({
 
   if (!clip) return null
 
-  const isShaky = clip.shake_score > 0.15
-  const isBlurry = clip.blur_score > 0.7
-  const exposureBad = clip.exposure_score < 0.2 || clip.exposure_score > 0.9
+  // Suppress noisy heuristic flags when AI rated the clip well —
+  // matches the same gate used in ClipCard so badges agree.
+  const aiTrust = (clip.ai_quality ?? 0) >= 7
+  const isShaky = !aiTrust && clip.shake_score > 0.35
+  const isBlurry = !aiTrust && clip.blur_score > 0.7
+  const exposureBad = !aiTrust && (clip.exposure_score < 0.2 || clip.exposure_score > 0.9)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

@@ -30,6 +30,10 @@ LOCAL_VLM_MODEL = os.environ.get(
 MAX_TOKENS = int(os.environ.get("LOCAL_VLM_MAX_TOKENS", "512"))
 MAX_KEYFRAMES = int(os.environ.get("LOCAL_VLM_MAX_KEYFRAMES", "4"))
 AUDIT_PASS = os.environ.get("LOCAL_VLM_AUDIT", "1") == "1"
+# Trust CLIP segment classification when its top score is at least this far
+# above the runner-up. Qwen2-VL 2B confuses bride/groom prep too often;
+# CLIP zero-shot is the more reliable signal for visual category.
+CLIP_SEGMENT_MARGIN = float(os.environ.get("LOCAL_CLIP_SEG_MARGIN", "0.02"))
 
 CANONICAL_SEGMENTS = [
     "Groomsmen Getting Ready",
@@ -220,7 +224,21 @@ def synthesize(
                     "local_vlm: audit corrected segment %r → %r",
                     initial.get("segment"), audited.get("segment"),
                 )
-            return audited
+            initial = audited
+
+    # CLIP-based segment override. Trust CLIP when its top score is ahead
+    # of runner-up by CLIP_SEGMENT_MARGIN — Qwen2-VL 2B otherwise confuses
+    # bride/groom prep, drone/aerial vs ambient, etc.
+    clip_seg = (video_intel or {}).get("clip_segment")
+    if clip_seg and isinstance(clip_seg.get("ranked"), list) and len(clip_seg["ranked"]) >= 2:
+        top_seg, top_score = clip_seg["ranked"][0]
+        _, runner_score = clip_seg["ranked"][1]
+        if (top_score - runner_score) >= CLIP_SEGMENT_MARGIN and top_seg != initial.get("segment"):
+            logger.info(
+                "local_vlm: CLIP override segment %r → %r (score=%.3f, margin=%.3f)",
+                initial.get("segment"), top_seg, top_score, top_score - runner_score,
+            )
+            initial["segment"] = top_seg
 
     return initial
 
