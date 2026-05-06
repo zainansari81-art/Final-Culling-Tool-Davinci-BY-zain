@@ -326,6 +326,8 @@ def analyze_single_clip(file_path: str, job_id: str) -> ClipReview:
     Full analysis pipeline for one video file.
     Designed to be called inside a thread-pool worker.
     """
+    import time
+    _t0 = time.monotonic()
     clip_id = str(uuid.uuid4())
     filename = Path(file_path).name
 
@@ -400,6 +402,7 @@ def analyze_single_clip(file_path: str, job_id: str) -> ClipReview:
             shake_score < 0.5 and blur_score < 0.85 and exposure_ok
         )
 
+    scores.analysis_sec = round(time.monotonic() - _t0, 3)
     return ClipReview(
         clip_id=clip_id,
         path=file_path,

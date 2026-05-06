@@ -159,6 +159,14 @@ export default function ClipCard({
         <div className="absolute bottom-2 right-2 rounded-md bg-background/80 px-1.5 py-0.5 text-[11px] tabular-nums text-foreground backdrop-blur">
           {fmtDuration(clip.duration_sec)}
         </div>
+        {clip.analysis_sec != null && (
+          <div
+            className="absolute bottom-2 left-2 rounded-md bg-background/80 px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground backdrop-blur"
+            title={`Analysis took ${clip.analysis_sec.toFixed(2)} s`}
+          >
+            ⏱ {clip.analysis_sec.toFixed(1)}s
+          </div>
+        )}
         {clip.approved === true && (
           <div className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-success text-success-foreground shadow-sm">
             <Check className="h-3.5 w-3.5" />

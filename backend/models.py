@@ -73,6 +73,7 @@ class ClipScore(BaseModel):
     clip_type: str = "BROLL"                      # "AROLL" (dialogue) | "BROLL"
     needs_stabilization: bool = False             # camera never settled long enough
     placement_confidence: Optional[float] = None  # 0-100 from Gemini
+    analysis_sec: Optional[float] = None         # wall-clock seconds spent analyzing this clip
 
 
 class ClipReview(BaseModel):

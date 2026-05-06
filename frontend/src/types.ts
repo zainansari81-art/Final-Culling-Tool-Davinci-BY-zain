@@ -28,6 +28,7 @@ export interface ClipResult {
   sequence_position?: number | null
   dialogue_trimmed?: boolean
   needs_stabilization: boolean
+  analysis_sec: number | null
   word_count?: number
 }
 

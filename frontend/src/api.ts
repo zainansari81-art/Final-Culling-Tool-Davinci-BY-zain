@@ -39,6 +39,7 @@ function toClipResult(raw: any): ClipResult {
     sequence_position: scores.sequence_position ?? null,
     dialogue_trimmed: scores.dialogue_trimmed ?? false,
     needs_stabilization: scores.needs_stabilization ?? false,
+    analysis_sec: scores.analysis_sec ?? null,
     word_count: Array.isArray(scores.words) ? scores.words.length : 0,
   }
 }
