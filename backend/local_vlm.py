@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -67,21 +68,30 @@ Respond with ONLY valid JSON, no prose, no markdown:
 _model = None
 _processor = None
 _config = None
+_gpu_stream = None
+_vlm_lock = threading.Lock()  # MLX inference is single-stream; serialize calls
+_load_lock = threading.Lock()
 
 
 def _load_model():
-    global _model, _processor, _config
+    global _model, _processor, _config, _gpu_stream
     if _model is not None:
-        return _model, _processor, _config
-    import download_progress
-    download_progress.install()
-    from mlx_vlm import load
-    from mlx_vlm.utils import load_config
-    logger.info("local_vlm: loading %s (first call, may download ~1.5 GB)", LOCAL_VLM_MODEL)
-    _model, _processor = load(LOCAL_VLM_MODEL)
-    _config = load_config(LOCAL_VLM_MODEL)
-    logger.info("local_vlm: model loaded")
-    return _model, _processor, _config
+        return _model, _processor, _config, _gpu_stream
+    with _load_lock:
+        if _model is not None:
+            return _model, _processor, _config, _gpu_stream
+        import download_progress
+        download_progress.install()
+        import mlx.core as mx
+        from mlx_vlm import load
+        from mlx_vlm.utils import load_config
+        logger.info("local_vlm: loading %s (first call, may download ~1.5 GB)", LOCAL_VLM_MODEL)
+        _model, _processor = load(LOCAL_VLM_MODEL)
+        _config = load_config(LOCAL_VLM_MODEL)
+        # Capture the GPU stream this thread owns; reuse across worker threads.
+        _gpu_stream = mx.default_stream(mx.gpu)
+        logger.info("local_vlm: model loaded (stream=%s)", _gpu_stream)
+    return _model, _processor, _config, _gpu_stream
 
 
 def synthesize(
@@ -109,17 +119,24 @@ def synthesize(
     )
 
     try:
+        import mlx.core as mx
         from mlx_vlm import generate
         from mlx_vlm.prompt_utils import apply_chat_template
-        model, processor, config = _load_model()
+        model, processor, config, gpu_stream = _load_model()
         formatted = apply_chat_template(processor, config, prompt, num_images=len(images))
-        result = generate(
-            model, processor, formatted,
-            image=images,
-            max_tokens=MAX_TOKENS,
-            temperature=0.2,
-            verbose=False,
-        )
+        # MLX binds streams to the thread that created them. The analyzer's
+        # ThreadPoolExecutor calls us from arbitrary worker threads, so wrap
+        # generate() in `mx.stream(...)` AND a process-wide lock so all
+        # inference runs against the same stream serially.
+        with _vlm_lock:
+            with mx.stream(gpu_stream):
+                result = generate(
+                    model, processor, formatted,
+                    image=images,
+                    max_tokens=MAX_TOKENS,
+                    temperature=0.2,
+                    verbose=False,
+                )
         text = getattr(result, "text", str(result)).strip()
     except Exception as exc:  # noqa: BLE001
         logger.exception("local_vlm: inference failed: %s", exc)

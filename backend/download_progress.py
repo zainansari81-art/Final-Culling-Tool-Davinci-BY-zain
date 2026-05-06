@@ -51,13 +51,10 @@ def install() -> None:
             unit = getattr(self, "unit", "it") or "it"
             unit_scale = getattr(self, "unit_scale", False)
             desc = (getattr(self, "desc", "") or "download").strip(": ")
-            if total > 0:
-                if unit_scale and unit in ("B", "iB"):
-                    logger.info(
-                        "↓ start %s (%.1f MB)", desc, total / (1024 * 1024),
-                    )
-                else:
-                    logger.info("↓ start %s (%d %s)", desc, total, unit)
+            # Only log "start" for real byte-streamed downloads, not for
+            # snapshot_download's per-file iter bar (which shows "N it").
+            if total > 0 and unit_scale and unit in ("B", "iB"):
+                logger.info("↓ start %s (%.1f MB)", desc, total / (1024 * 1024))
 
         def update(self, n: int = 1) -> Any:
             res = super().update(n)
