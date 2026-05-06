@@ -506,6 +506,39 @@ def _run_ai_pipeline(
         scores.ai_in_sec = float(in_s) if isinstance(in_s, (int, float)) else None
         scores.ai_out_sec = float(out_s) if isinstance(out_s, (int, float)) else None
 
+    # ─── Stability-based trim (Phase 1a default) ──────────────────────────
+    # The VLM hint above is now overridden by the deterministic stability
+    # window unless the clip needs stabilization. Dialogue trim later may
+    # still override for AROLL clips when speech is the actual subject.
+    try:
+        import stability_trim
+        # Re-extract keyframes here would be wasteful; the analyzer caller
+        # already has them but doesn't hand them in. Cheapest path: re-read
+        # via extract_keyframes (cached in PyAV's IO cache for hot files).
+        stab_frames = extract_keyframes(file_path, KEYFRAME_INTERVAL_SEC)
+        stab = stability_trim.compute_stability_trim(
+            stab_frames, duration_sec, interval_sec=KEYFRAME_INTERVAL_SEC,
+        )
+        scores.needs_stabilization = stab.needs_stabilization
+        if not stab.needs_stabilization and stab.in_sec is not None:
+            scores.ai_in_sec = stab.in_sec
+            scores.ai_out_sec = stab.out_sec
+            logger.info(
+                "Stability trim %s: %.2fs–%.2fs (longest steady run %.1fs)",
+                fname, stab.in_sec, stab.out_sec, stab.longest_stable_sec,
+            )
+        elif stab.needs_stabilization:
+            logger.info(
+                "%s flagged Needs Stabilization (longest steady run %.1fs)",
+                fname, stab.longest_stable_sec,
+            )
+    except Exception as exc:  # noqa: BLE001
+        # Couldn't judge stability — assume the worst so dialogue trim
+        # below also bails. Better to keep the whole clip than mis-trim
+        # a shaky one based on incidental speech.
+        scores.needs_stabilization = True
+        logger.warning("Stability trim failed for %s: %s", fname, exc)
+
     # ─── Clip type classification (AROLL vs BROLL) ────────────────────────
     # AROLL only when speech is genuinely the subject of the clip:
     #   - the AI segment is a dialogue-driven moment, OR
@@ -531,11 +564,15 @@ def _run_ai_pipeline(
         else "BROLL"
     )
 
-    # ─── Dialogue-aware trim takes precedence when speech is present ──────
-    # Only run on AROLL clips. BROLL with stray background words (TV in the
-    # next room, a single shouted name) would otherwise get clipped to a 2 s
-    # snippet around that noise.
-    if scores.clip_type == "AROLL" and scores.words:
+    # ─── Dialogue-aware trim — only when AROLL AND speech is the subject ──
+    # Stability trim above already set in/out for visual moments. Dialogue
+    # trim only takes over for AROLL clips that ALSO weren't flagged as
+    # needing stabilization (a shaky speech clip is unusable anyway).
+    if (
+        scores.clip_type == "AROLL"
+        and scores.words
+        and not scores.needs_stabilization
+    ):
         import dialogue_trim
         word_dicts = [
             {"word": w.word, "start_sec": w.start_sec, "end_sec": w.end_sec}

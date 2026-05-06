@@ -38,6 +38,7 @@ function toClipResult(raw: any): ClipResult {
     rank_in_group: scores.rank_in_group ?? null,
     sequence_position: scores.sequence_position ?? null,
     dialogue_trimmed: scores.dialogue_trimmed ?? false,
+    needs_stabilization: scores.needs_stabilization ?? false,
     word_count: Array.isArray(scores.words) ? scores.words.length : 0,
   }
 }

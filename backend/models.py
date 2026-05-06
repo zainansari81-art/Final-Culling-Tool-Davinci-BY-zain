@@ -71,6 +71,7 @@ class ClipScore(BaseModel):
     sequence_position: Optional[int] = None       # 1-based narrative order
     dialogue_trimmed: bool = False                # in/out came from speech
     clip_type: str = "BROLL"                      # "AROLL" (dialogue) | "BROLL"
+    needs_stabilization: bool = False             # camera never settled long enough
     placement_confidence: Optional[float] = None  # 0-100 from Gemini
 
 

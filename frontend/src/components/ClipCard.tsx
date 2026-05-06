@@ -150,6 +150,11 @@ export default function ClipCard({
               <Eye className="h-3 w-3" /> Expo
             </Badge>
           )}
+          {clip.needs_stabilization && (
+            <Badge className="gap-1 border-0 bg-destructive/90 text-destructive-foreground">
+              <Wind className="h-3 w-3" /> Needs Stabilization
+            </Badge>
+          )}
         </div>
         <div className="absolute bottom-2 right-2 rounded-md bg-background/80 px-1.5 py-0.5 text-[11px] tabular-nums text-foreground backdrop-blur">
           {fmtDuration(clip.duration_sec)}
