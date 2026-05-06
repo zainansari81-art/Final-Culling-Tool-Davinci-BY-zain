@@ -153,3 +153,46 @@ def compute_stability_trim(
         longest_stable_sec=longest_sec,
         states=states,
     )
+
+
+def compute_stability_trim_from_motion(
+    motion: List[float],
+    duration_sec: float,
+    interval_sec: float = 1.0,
+) -> StabilityResult:
+    """Phase 1b entrypoint: dense per-second motion array (no frame decode).
+
+    Same algorithm as compute_stability_trim but consumes a precomputed
+    magnitude array. interval_sec defaults to 1.0 because dense_features
+    samples at 1 Hz; pass another value if upstream sampling differs.
+    """
+    if not motion:
+        return StabilityResult(
+            in_sec=0.0, out_sec=duration_sec,
+            needs_stabilization=False,
+            longest_stable_sec=duration_sec,
+            states=[],
+        )
+    states = _classify_windows(motion)
+    start_idx, end_idx = _longest_keep_run(states)
+    longest_sec = (end_idx - start_idx) * interval_sec
+    if longest_sec < NEEDS_STAB_SEC:
+        return StabilityResult(
+            in_sec=None, out_sec=None,
+            needs_stabilization=True,
+            longest_stable_sec=longest_sec,
+            states=states,
+        )
+    raw_in = start_idx * interval_sec
+    raw_out = end_idx * interval_sec
+    in_sec = max(0.0, raw_in - LEAD_IN_SEC)
+    out_sec = min(duration_sec, raw_out + TAIL_OUT_SEC)
+    if (out_sec - in_sec) < MIN_KEEP_SEC:
+        in_sec, out_sec = 0.0, duration_sec
+    return StabilityResult(
+        in_sec=in_sec,
+        out_sec=out_sec,
+        needs_stabilization=False,
+        longest_stable_sec=longest_sec,
+        states=states,
+    )

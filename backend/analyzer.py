@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -369,6 +370,8 @@ def analyze_single_clip(file_path: str, job_id: str) -> ClipReview:
                 exposure_ok=exposure_ok,
                 ai_keyframes=ai_keyframes,
                 scores=scores,
+                job_id=job_id,
+                clip_id=clip_id,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("AI pipeline failed for %s: %s", filename, exc)
@@ -417,6 +420,8 @@ def _run_ai_pipeline(
     exposure_ok: bool,
     ai_keyframes: List[str],
     scores: ClipScore,
+    job_id: str,
+    clip_id: str,
 ) -> ClipScore:
     """Run AI video analysis + VLM synthesis via the configured backend.
     Mutates and returns scores."""
@@ -506,32 +511,47 @@ def _run_ai_pipeline(
         scores.ai_in_sec = float(in_s) if isinstance(in_s, (int, float)) else None
         scores.ai_out_sec = float(out_s) if isinstance(out_s, (int, float)) else None
 
-    # ─── Stability-based trim (Phase 1a default) ──────────────────────────
-    # The VLM hint above is now overridden by the deterministic stability
-    # window unless the clip needs stabilization. Dialogue trim later may
-    # still override for AROLL clips when speech is the actual subject.
+    # ─── Stability + dense-feature trim (Phase 1b) ───────────────────────
+    # Pulls one motion sample per second via dense_features.extract_dense
+    # and feeds the resulting array directly into stability_trim, giving
+    # 2x finer granularity than the keyframe path. Audio RMS is also
+    # captured here for future archetype scoring (Phase 1c+).
     try:
+        import dense_features
         import stability_trim
-        # Re-extract keyframes here would be wasteful; the analyzer caller
-        # already has them but doesn't hand them in. Cheapest path: re-read
-        # via extract_keyframes (cached in PyAV's IO cache for hot files).
-        stab_frames = extract_keyframes(file_path, KEYFRAME_INTERVAL_SEC)
-        stab = stability_trim.compute_stability_trim(
-            stab_frames, duration_sec, interval_sec=KEYFRAME_INTERVAL_SEC,
+        dense = dense_features.extract_dense(file_path)
+        if dense is None:
+            raise RuntimeError("dense_features returned None")
+        stab = stability_trim.compute_stability_trim_from_motion(
+            motion=dense.motion,
+            duration_sec=duration_sec,
+            interval_sec=1.0 / dense.sample_hz,
         )
         scores.needs_stabilization = stab.needs_stabilization
         if not stab.needs_stabilization and stab.in_sec is not None:
             scores.ai_in_sec = stab.in_sec
             scores.ai_out_sec = stab.out_sec
             logger.info(
-                "Stability trim %s: %.2fs–%.2fs (longest steady run %.1fs)",
-                fname, stab.in_sec, stab.out_sec, stab.longest_stable_sec,
+                "Stability trim %s: %.2fs–%.2fs (longest steady run %.1fs, %d motion samples)",
+                fname, stab.in_sec, stab.out_sec, stab.longest_stable_sec, len(dense.motion),
             )
         elif stab.needs_stabilization:
             logger.info(
-                "%s flagged Needs Stabilization (longest steady run %.1fs)",
-                fname, stab.longest_stable_sec,
+                "%s flagged Needs Stabilization (longest steady run %.1fs, %d motion samples)",
+                fname, stab.longest_stable_sec, len(dense.motion),
             )
+        # Persist dense features as a sidecar so archetype scorers can
+        # consume them later without re-decoding the video. Pin to an
+        # absolute path next to this module so the location is stable
+        # regardless of which directory uvicorn was launched from.
+        try:
+            features_dir = Path(__file__).resolve().parent / "jobs" / job_id / "features"
+            features_dir.mkdir(parents=True, exist_ok=True)
+            (features_dir / f"{clip_id}.json").write_text(
+                json.dumps(dense.to_dict()),
+            )
+        except Exception as persist_exc:  # noqa: BLE001
+            logger.debug("dense feature persist failed for %s: %s", fname, persist_exc)
     except Exception as exc:  # noqa: BLE001
         # Couldn't judge stability — assume the worst so dialogue trim
         # below also bails. Better to keep the whole clip than mis-trim
