@@ -406,13 +406,13 @@ def _run_ai_pipeline(
     ai_keyframes: List[str],
     scores: ClipScore,
 ) -> ClipScore:
-    """Run Vertex Video Intel + Gemini synthesis. Mutates and returns scores."""
-    import vertex_gemini
-    import vertex_video
+    """Run AI video analysis + VLM synthesis via the configured backend.
+    Mutates and returns scores."""
+    import ai_backend
 
     fname = Path(file_path).name
-    logger.info("AI: Vertex Video Intel for %s", fname)
-    vi_result = vertex_video.analyze_local_file(file_path, cleanup=True)
+    logger.info("AI: video analysis for %s", fname)
+    vi_result = ai_backend.analyze_video(file_path, cleanup=True)
 
     if vi_result:
         scores.transcript = vi_result.get("transcript") or None
@@ -467,8 +467,8 @@ def _run_ai_pipeline(
         except Exception as exc:  # noqa: BLE001
             logger.warning("Whisper fallback failed for %s: %s", fname, exc)
 
-    logger.info("AI: Gemini synthesis for %s", fname)
-    decision = vertex_gemini.synthesize(
+    logger.info("AI: VLM synthesis for %s", fname)
+    decision = ai_backend.synthesize(
         keyframe_jpeg_paths=ai_keyframes,
         duration_sec=duration_sec,
         shake_score=shake_score,
@@ -637,14 +637,14 @@ def analyze_folder(
         # by source path so C0001.MP4 comes before C0010.MP4 by default.
         clip_results.sort(key=lambda c: c.path.lower())
 
-        # ── Cross-clip ranking via Gemini on Vertex (AI-only) ─────────────
+        # ── Cross-clip ranking via configured AI backend ──────────────────
         if _ai_enabled():
             try:
-                import vertex_rerank
+                import ai_backend
                 job.progress = 98.0
                 jobs_store[job_id] = job
-                n = vertex_rerank.rerank_job(clip_results)
-                logger.info("Gemini ranked %d segment group(s)", n)
+                n = ai_backend.rerank_job(clip_results)
+                logger.info("AI ranked %d segment group(s)", n)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Cross-clip ranking failed: %s", exc)
 
