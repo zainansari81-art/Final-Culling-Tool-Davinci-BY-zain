@@ -19,7 +19,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger("analyzer")
 
 LOCAL_VLM_MODEL = os.environ.get(
     "LOCAL_VLM_MODEL",

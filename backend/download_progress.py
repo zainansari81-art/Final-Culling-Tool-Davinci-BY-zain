@@ -18,7 +18,7 @@ import logging
 import time
 from typing import Any
 
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger("analyzer")
 
 _installed = False
 

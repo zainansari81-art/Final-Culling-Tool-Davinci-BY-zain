@@ -18,7 +18,7 @@ import re
 from collections import defaultdict
 from typing import Any, Dict, List
 
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger("analyzer")
 
 MIN_GROUP_SIZE = 2
 DIALOGUE_THRESHOLD = 0.5

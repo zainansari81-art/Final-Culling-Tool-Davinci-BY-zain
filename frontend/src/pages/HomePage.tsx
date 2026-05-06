@@ -13,6 +13,7 @@ import { api, type AiInfo } from '../api'
 import type { AnalysisJob } from '../types'
 import BackendError from '../components/BackendError'
 import FolderBrowser from '../components/FolderBrowser'
+import LocalWarmupCard from '../components/LocalWarmupCard'
 import LogPane from '../components/LogPane'
 import { Step, Stepper, type StepState } from '../components/StepCard'
 import { Badge } from '@/components/ui/badge'
@@ -175,6 +176,8 @@ export default function HomePage() {
                 Pick a folder, run analysis, then review and export your selects.
               </p>
             </div>
+
+            {aiInfo?.backend === 'local' && <LocalWarmupCard />}
 
             <Stepper>
               {/* Step 1: Pick footage */}

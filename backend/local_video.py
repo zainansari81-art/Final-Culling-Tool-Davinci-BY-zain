@@ -22,7 +22,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger("analyzer")
 
 CLIP_MODEL = os.environ.get("LOCAL_CLIP_MODEL", "ViT-B-32")
 CLIP_PRETRAINED = os.environ.get("LOCAL_CLIP_PRETRAINED", "openai")

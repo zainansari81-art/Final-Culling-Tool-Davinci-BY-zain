@@ -104,9 +104,28 @@ export interface AiInfo {
   clip_model: string | null
 }
 
+export interface LocalModelStatus {
+  vlm_model: string
+  clip_model: string
+  vlm_cached: boolean
+  clip_cached: boolean
+  running: boolean
+  done: boolean
+  error: string | null
+}
+
 export const api = {
   aiInfo: (): Promise<AiInfo> =>
     client.get('/ai/info').then((r) => r.data),
+
+  localStatus: (): Promise<LocalModelStatus> =>
+    client.get('/ai/local/status').then((r) => r.data),
+
+  startWarmup: (): Promise<{ status: string }> =>
+    client.post('/ai/local/warmup').then((r) => r.data),
+
+  warmupLogs: (since: number): Promise<{ lines: string[]; total: number }> =>
+    client.get('/ai/local/logs', { params: { since } }).then((r) => r.data),
 
   fsList: (path?: string): Promise<FsListResponse> =>
     client.get('/fs/list', { params: path ? { path } : {} }).then((r) => r.data),

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
@@ -128,6 +129,93 @@ _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="culling")
 @app.get("/", summary="Health check")
 def health_check() -> Dict[str, str]:
     return {"status": "ok", "service": "wedding-culling-tool"}
+
+
+# ─────────────────────────── Local model warmup ─────────────────────────────
+
+WARMUP_LOG_KEY = "__warmup__"
+_warmup_state: Dict[str, Any] = {"running": False, "done": False, "error": None}
+
+
+def _hf_cache_path(repo_id: str) -> Path:
+    """Return the snapshot dir HF would use for a repo, if cached."""
+    home = Path(os.path.expanduser("~"))
+    base = Path(os.environ.get("HF_HOME", home / ".cache" / "huggingface"))
+    safe = "models--" + repo_id.replace("/", "--")
+    return base / "hub" / safe
+
+
+def _local_models_status() -> Dict[str, Any]:
+    vlm_repo = os.environ.get(
+        "LOCAL_VLM_MODEL", "mlx-community/Qwen2-VL-2B-Instruct-4bit",
+    )
+    clip_model = os.environ.get("LOCAL_CLIP_MODEL", "ViT-B-32")
+    clip_pre = os.environ.get("LOCAL_CLIP_PRETRAINED", "openai")
+    # open_clip caches under ~/.cache/clip or HF hub, hard to detect cleanly;
+    # treat "ever loaded once" via in-process flag as the signal too.
+    vlm_dir = _hf_cache_path(vlm_repo)
+    return {
+        "vlm_model": vlm_repo,
+        "clip_model": f"{clip_model}/{clip_pre}",
+        "vlm_cached": vlm_dir.exists() and any(vlm_dir.rglob("*.safetensors")),
+        "clip_cached": _warmup_state.get("clip_loaded", False),
+        "running": _warmup_state["running"],
+        "done": _warmup_state["done"],
+        "error": _warmup_state["error"],
+    }
+
+
+def _run_warmup() -> None:
+    handler = JobLogHandler(WARMUP_LOG_KEY)
+    handler.setLevel(logging.INFO)
+    analyzer_logger = logging.getLogger("analyzer")
+    analyzer_logger.addHandler(handler)
+    job_logs[WARMUP_LOG_KEY].append(
+        f"{datetime.now().strftime('%H:%M:%S')} I Local model warmup started"
+    )
+    _warmup_state["running"] = True
+    _warmup_state["done"] = False
+    _warmup_state["error"] = None
+    try:
+        import local_vlm
+        import local_video
+        local_vlm._load_model()
+        local_video._load_clip()
+        _warmup_state["clip_loaded"] = True
+        _warmup_state["done"] = True
+        job_logs[WARMUP_LOG_KEY].append(
+            f"{datetime.now().strftime('%H:%M:%S')} I Warmup complete — both models cached"
+        )
+    except Exception as exc:  # noqa: BLE001
+        _warmup_state["error"] = str(exc)
+        job_logs[WARMUP_LOG_KEY].append(
+            f"{datetime.now().strftime('%H:%M:%S')} E Warmup failed: {exc}"
+        )
+    finally:
+        _warmup_state["running"] = False
+        analyzer_logger.removeHandler(handler)
+
+
+@app.post("/ai/local/warmup", summary="Pre-download Qwen2-VL and CLIP")
+def warmup_local() -> Dict[str, Any]:
+    if _warmup_state["running"]:
+        return {"status": "already_running"}
+    _executor.submit(_run_warmup)
+    return {"status": "started"}
+
+
+@app.get("/ai/local/status", summary="Local model cache status")
+def local_status() -> Dict[str, Any]:
+    return _local_models_status()
+
+
+@app.get("/ai/local/logs", summary="Local warmup logs")
+def warmup_logs(since: int = 0) -> Dict[str, Any]:
+    buf = job_logs.get(WARMUP_LOG_KEY)
+    lines = list(buf) if buf else []
+    total = len(lines)
+    new_lines = lines[since:] if since < total else []
+    return {"lines": new_lines, "total": total}
 
 
 @app.get("/ai/info", summary="Active AI backend info")
