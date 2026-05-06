@@ -451,6 +451,27 @@ function JobRow({ job }: { job: AnalysisJob }) {
         <span className="flex items-center gap-1">
           <Clock className="h-3 w-3" />
           {formatDate(job.created_at)}
+          {(() => {
+            if (!job.started_at) return null
+            const end = job.completed_at
+              ? new Date(job.completed_at).getTime()
+              : Date.now()
+            const start = new Date(job.started_at).getTime()
+            const sec = Math.max(0, (end - start) / 1000)
+            const m = Math.floor(sec / 60)
+            const s = sec - m * 60
+            const txt = m > 0 ? `${m}m ${s.toFixed(0)}s` : `${s.toFixed(1)}s`
+            return (
+              <span
+                className="tabular-nums text-muted-foreground/80"
+                title={
+                  job.completed_at ? `Total run time ${txt}` : `Running ${txt} so far`
+                }
+              >
+                · ⏱ {txt}
+              </span>
+            )
+          })()}
         </span>
         <span>
           {statusLabel}
