@@ -29,6 +29,7 @@ LOCAL_VLM_MODEL = os.environ.get(
 )
 MAX_TOKENS = int(os.environ.get("LOCAL_VLM_MAX_TOKENS", "512"))
 MAX_KEYFRAMES = int(os.environ.get("LOCAL_VLM_MAX_KEYFRAMES", "4"))
+AUDIT_PASS = os.environ.get("LOCAL_VLM_AUDIT", "1") == "1"
 
 CANONICAL_SEGMENTS = [
     "Groomsmen Getting Ready",
@@ -42,6 +43,41 @@ CANONICAL_SEGMENTS = [
     "Ambiance / BTS",
     "Backup",
 ]
+
+_AUDIT_PROMPT = """You are an SENIOR wedding video editor reviewing a JUNIOR editor's
+initial decision on the keyframes you also see.
+
+INITIAL DECISION (JSON):
+{initial}
+
+CLIP CONTEXT:
+- CLIP zero-shot labels: {clip_labels}
+- Transcript (may be unrelated background, ignore for visual decisions):
+  {transcript}
+- Clip duration: {duration_sec} seconds
+- {n_frames} keyframes attached.
+
+CANONICAL SEGMENTS (use one EXACTLY):
+{segments}
+
+Audit the decision. Be strict:
+1. Does the segment match what is actually visible in the keyframes?
+   White gown on hanger / no people = "Bride Getting Ready". Suit /
+   ties / cufflinks = "Groomsmen Getting Ready". Etc.
+2. Is the caption literal? Reject any invented actions. If only an
+   object is visible, the caption must describe the object — never
+   "the bride is putting on" if no bride is visible.
+3. Subjects: do they list only people actually visible?
+4. Quality: a clean, well-composed static product/object shot is 7+,
+   not 3. Penalize only for genuinely bad framing/focus/exposure.
+5. skip = true ONLY for: lens cap, color chart, mic check, totally
+   black/garbled frames. A short clip is not a reason to skip.
+6. If the initial decision is correct, return it unchanged.
+
+Return ONLY the corrected JSON, same schema:
+{{"segment":"<one of canonical>","moment":"<3-7 words>","caption":"<one literal sentence>","quality":<0-10>,"subjects":["..."],"skip":<true|false>,"skip_reason":"<reason or null>","in_sec":<number or null>,"out_sec":<number or null>}}
+"""
+
 
 _PROMPT = """You are a wedding videographer's editor. Look at the keyframes and choose the best canonical segment.
 
@@ -168,6 +204,51 @@ def synthesize(
     if not parsed:
         logger.warning("local_vlm: could not parse JSON from VLM output: %s", text[:200])
         return _heuristic_decision(duration_sec, shake_score, blur_score, exposure_ok, video_intel)
+    initial = _normalize(parsed)
+
+    if AUDIT_PASS:
+        audited = _run_audit(
+            initial=initial,
+            images=images,
+            clip_labels=clip_labels,
+            transcript=transcript or "(no speech detected)",
+            duration_sec=duration_sec,
+        )
+        if audited:
+            if audited.get("segment") != initial.get("segment"):
+                logger.info(
+                    "local_vlm: audit corrected segment %r → %r",
+                    initial.get("segment"), audited.get("segment"),
+                )
+            return audited
+
+    return initial
+
+
+def _run_audit(
+    initial: Dict[str, Any],
+    images: List[str],
+    clip_labels: str,
+    transcript: str,
+    duration_sec: float,
+) -> Optional[Dict[str, Any]]:
+    prompt = _AUDIT_PROMPT.format(
+        initial=json.dumps(initial, separators=(",", ":")),
+        clip_labels=clip_labels,
+        transcript=transcript,
+        duration_sec=round(duration_sec, 1),
+        n_frames=len(images),
+        segments="\n".join(f"- {s}" for s in CANONICAL_SEGMENTS),
+    )
+    try:
+        text = _vlm_executor.submit(_run_inference, prompt, images).result()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("local_vlm: audit pass failed, keeping initial: %s", exc)
+        return None
+    parsed = _parse_json(text)
+    if not parsed:
+        logger.warning("local_vlm: audit JSON unparseable, keeping initial")
+        return None
     return _normalize(parsed)
 
 
