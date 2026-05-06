@@ -1,0 +1,5 @@
+# Optional dependencies for AI_BACKEND=local (Apple Silicon only).
+# Install on top of requirements.txt:
+#   pip install -r requirements.txt -r requirements-local.txt
+mlx-vlm           # Qwen2-VL via mlx
+open_clip_torch   # CLIP zero-shot labels

@@ -28,11 +28,17 @@ def _log_once():
         _log_once._done = True  # type: ignore[attr-defined]
 
 
-def analyze_video(file_path: str, cleanup: bool = True) -> Optional[Dict[str, Any]]:
+def analyze_video(
+    file_path: str,
+    cleanup: bool = True,
+    keyframe_paths: Optional[List[str]] = None,
+) -> Optional[Dict[str, Any]]:
     _log_once()
     if BACKEND == "local":
         import local_video
-        return local_video.analyze_local_file(file_path, cleanup=cleanup)
+        return local_video.analyze_local_file(
+            file_path, cleanup=cleanup, keyframe_paths=keyframe_paths,
+        )
     import vertex_video
     return vertex_video.analyze_local_file(file_path, cleanup=cleanup)
 

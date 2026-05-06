@@ -412,7 +412,9 @@ def _run_ai_pipeline(
 
     fname = Path(file_path).name
     logger.info("AI: video analysis for %s", fname)
-    vi_result = ai_backend.analyze_video(file_path, cleanup=True)
+    vi_result = ai_backend.analyze_video(
+        file_path, cleanup=True, keyframe_paths=ai_keyframes,
+    )
 
     if vi_result:
         scores.transcript = vi_result.get("transcript") or None

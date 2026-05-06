@@ -1,37 +1,85 @@
 """Local equivalent of vertex_gemini.synthesize.
 
-Target: Qwen2-VL 2B via mlx-vlm on Apple Silicon. Returns same dict shape
-Gemini emits:
+Runs Qwen2-VL 2B (4-bit) via mlx-vlm on Apple Silicon. Returns the same
+dict shape Gemini emits so analyzer.py is unchanged:
 
-  {
-    "segment":      str | None,
-    "moment":       str | None,
-    "caption":      str | None,
-    "quality":      float (0-10),
-    "subjects":     [str, ...],
-    "skip":         bool,
-    "skip_reason":  str | None,
-    "in_sec":       float | None,
-    "out_sec":      float | None,
-  }
+  {"segment","moment","caption","quality","subjects",
+   "skip","skip_reason","in_sec","out_sec"}
 
-Stub. v1 returns a deterministic best-effort decision derived from the
-local heuristic signals so the rest of the pipeline still produces clips
-without the VLM. Replace _vlm_decide with mlx-vlm Qwen2-VL inference.
+Lazy-loads the model on first call. Falls back to a heuristic decision
+if mlx-vlm is unavailable or inference fails.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("uvicorn.error")
 
+LOCAL_VLM_MODEL = os.environ.get(
+    "LOCAL_VLM_MODEL",
+    "mlx-community/Qwen2-VL-2B-Instruct-4bit",
+)
+MAX_TOKENS = int(os.environ.get("LOCAL_VLM_MAX_TOKENS", "512"))
+MAX_KEYFRAMES = int(os.environ.get("LOCAL_VLM_MAX_KEYFRAMES", "4"))
+
 CANONICAL_SEGMENTS = [
-    "ceremony", "vows", "rings", "first_kiss", "recessional",
-    "reception", "speeches", "first_dance", "cake", "party",
-    "preparation", "portraits", "broll",
+    "Groomsmen Getting Ready",
+    "Bride Getting Ready",
+    "First Look",
+    "Ceremony",
+    "Cocktail Hour",
+    "Reception / First Dance",
+    "Toasts",
+    "Drone / Aerial",
+    "Ambiance / BTS",
+    "Backup",
 ]
+
+_PROMPT = """You are a wedding videography editor reviewing one raw clip.
+
+You see {n_frames} keyframes from the clip in chronological order.
+
+Decide:
+1. Which canonical segment this clip belongs to (exact string from list).
+2. A 3-7 word "moment" description.
+3. A one-sentence caption a human editor would skim.
+4. Cinematic quality 0-10 (composition, focus, light, motion).
+5. Subjects visible (e.g. "bride", "groom", "officiant", "guests").
+6. Whether to skip this clip entirely (corrupted, mic check, lens cap).
+7. Suggested in/out seconds inside the clip for the keep portion.
+
+Canonical segments: {segments}
+
+Heuristic scores: shake={shake_score}, blur={blur_score}, exposure_ok={exposure_ok}
+Clip duration: {duration_sec} seconds
+Transcript: {transcript}
+
+Respond with ONLY valid JSON, no prose, no markdown:
+{{"segment":"<one of canonical>","moment":"<3-7 words>","caption":"<one sentence>","quality":<0-10>,"subjects":["..."],"skip":<true|false>,"skip_reason":"<reason or null>","in_sec":<number or null>,"out_sec":<number or null>}}
+"""
+
+_model = None
+_processor = None
+_config = None
+
+
+def _load_model():
+    global _model, _processor, _config
+    if _model is not None:
+        return _model, _processor, _config
+    from mlx_vlm import load
+    from mlx_vlm.utils import load_config
+    logger.info("local_vlm: loading %s (first call, may download)", LOCAL_VLM_MODEL)
+    _model, _processor = load(LOCAL_VLM_MODEL)
+    _config = load_config(LOCAL_VLM_MODEL)
+    logger.info("local_vlm: model loaded")
+    return _model, _processor, _config
 
 
 def synthesize(
@@ -42,15 +90,60 @@ def synthesize(
     exposure_ok: bool,
     video_intel: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
-    # TODO: load Qwen2-VL via mlx-vlm, build prompt with CANONICAL_SEGMENTS
-    # plus the keyframes and ask for the same JSON schema vertex_gemini uses.
-    return _heuristic_decision(
-        duration_sec=duration_sec,
-        shake_score=shake_score,
-        blur_score=blur_score,
-        exposure_ok=exposure_ok,
-        video_intel=video_intel,
+    transcript = ((video_intel or {}).get("transcript") or "")[:1500]
+    images = [p for p in keyframe_jpeg_paths[:MAX_KEYFRAMES] if Path(p).exists()]
+    if not images:
+        logger.warning("local_vlm: no keyframes, returning heuristic decision")
+        return _heuristic_decision(duration_sec, shake_score, blur_score, exposure_ok, video_intel)
+
+    prompt = _PROMPT.format(
+        n_frames=len(images),
+        segments=", ".join(CANONICAL_SEGMENTS),
+        shake_score=round(shake_score, 3),
+        blur_score=round(blur_score, 3),
+        exposure_ok="true" if exposure_ok else "false",
+        duration_sec=round(duration_sec, 1),
+        transcript=transcript or "(no speech detected)",
     )
+
+    try:
+        from mlx_vlm import generate
+        from mlx_vlm.prompt_utils import apply_chat_template
+        model, processor, config = _load_model()
+        formatted = apply_chat_template(processor, config, prompt, num_images=len(images))
+        result = generate(
+            model, processor, formatted,
+            image=images,
+            max_tokens=MAX_TOKENS,
+            temperature=0.2,
+            verbose=False,
+        )
+        text = getattr(result, "text", str(result)).strip()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("local_vlm: inference failed: %s", exc)
+        return _heuristic_decision(duration_sec, shake_score, blur_score, exposure_ok, video_intel)
+
+    parsed = _parse_json(text)
+    if not parsed:
+        logger.warning("local_vlm: could not parse JSON from VLM output: %s", text[:200])
+        return _heuristic_decision(duration_sec, shake_score, blur_score, exposure_ok, video_intel)
+    return parsed
+
+
+def _parse_json(text: str) -> Optional[Dict[str, Any]]:
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.MULTILINE)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if m:
+            try:
+                return json.loads(m.group(0))
+            except json.JSONDecodeError:
+                return None
+        return None
 
 
 def _heuristic_decision(
@@ -63,21 +156,13 @@ def _heuristic_decision(
     transcript = (video_intel or {}).get("transcript") or ""
     words = (video_intel or {}).get("words") or []
     has_speech = len(words) >= 3
-
-    # quality 0-10 from local metrics (placeholder until VLM lands)
-    q = 5.0
-    if exposure_ok:
-        q += 1.0
-    q -= min(shake_score * 5.0, 3.0)
-    q -= min(blur_score * 3.0, 2.0)
+    q = 5.0 + (1.0 if exposure_ok else 0.0) - min(shake_score * 5.0, 3.0) - min(blur_score * 3.0, 2.0)
     if has_speech:
         q += 1.0
     q = max(0.0, min(10.0, q))
-
     skip = (not exposure_ok) and (shake_score > 0.6 or blur_score > 0.6)
-
     return {
-        "segment": "broll" if not has_speech else None,
+        "segment": "Backup" if not has_speech else "Toasts",
         "moment": None,
         "caption": (transcript[:120] or None),
         "quality": round(q, 2),
