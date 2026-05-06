@@ -26,6 +26,19 @@ function toClipResult(raw: any): ClipResult {
     suggested_segment: raw.segment_label ?? raw.suggested_segment ?? 'Backup',
     approved: raw.approved ?? null,
     reject_reason: null,
+    ai_caption: scores.ai_caption ?? null,
+    ai_moment: scores.ai_moment ?? null,
+    ai_quality: scores.ai_quality ?? null,
+    ai_subjects: scores.ai_subjects ?? [],
+    ai_in_sec: scores.ai_in_sec ?? null,
+    ai_out_sec: scores.ai_out_sec ?? null,
+    ai_skip: scores.ai_skip ?? false,
+    ai_skip_reason: scores.ai_skip_reason ?? null,
+    transcript: scores.transcript ?? null,
+    rank_in_group: scores.rank_in_group ?? null,
+    sequence_position: scores.sequence_position ?? null,
+    dialogue_trimmed: scores.dialogue_trimmed ?? false,
+    word_count: Array.isArray(scores.words) ? scores.words.length : 0,
   }
 }
 
@@ -47,6 +60,41 @@ export interface FsListResponse {
   parent: string | null
   entries: FsEntry[]
   video_count: number
+}
+
+export interface SequenceWord {
+  word: string
+  start_sec: number
+  end_sec: number
+  speaker_tag: number | null
+}
+
+export interface SequenceItem {
+  clip_id: string
+  filename: string
+  segment: string
+  clip_type: 'AROLL' | 'BROLL'
+  duration_sec: number
+  ai_in_sec: number | null
+  ai_out_sec: number | null
+  ai_quality: number | null
+  ai_caption: string | null
+  transcript: string | null
+  words: SequenceWord[]
+  sequence_position: number | null
+  placement_confidence: number | null
+  approved: boolean | null
+  rank_in_group: number | null
+  thumbnail_url: string
+  stream_url: string
+  timeline_position: number
+}
+
+export interface SequenceResponse {
+  job_id: string
+  speaker_tags: number[]
+  speaker_names: Record<string, string>
+  items: SequenceItem[]
 }
 
 export const api = {
@@ -73,10 +121,21 @@ export const api = {
     client
       .patch(`/jobs/${jobId}/clips/${clipId}`, {
         approved: patch.approved,
-        // UI stores field as suggested_segment; backend field name is segment_label
         segment_label: patch.suggested_segment,
+        sequence_position: patch.sequence_position,
+        ai_in_sec: patch.ai_in_sec,
+        ai_out_sec: patch.ai_out_sec,
       })
       .then((r) => toClipResult(r.data)),
+
+  getSequence: (jobId: string): Promise<SequenceResponse> =>
+    client.get(`/jobs/${jobId}/sequence`).then((r) => r.data),
+
+  getSpeakers: (jobId: string): Promise<Record<string, string>> =>
+    client.get(`/jobs/${jobId}/speakers`).then((r) => r.data),
+
+  putSpeakers: (jobId: string, names: Record<string, string>): Promise<Record<string, string>> =>
+    client.put(`/jobs/${jobId}/speakers`, { speaker_names: names }).then((r) => r.data),
 
   approveAll: (jobId: string): Promise<{ approved: number; rejected: number; total: number }> =>
     client.post(`/jobs/${jobId}/approve-all`).then((r) => r.data),

@@ -34,6 +34,7 @@ from models import (
     JobStatus,
     ResolveExportRequest,
     UpdateClipRequest,
+    UpdateSpeakerNamesRequest,
 )
 
 # ─────────────────────────── Logging ────────────────────────────────────────
@@ -84,7 +85,12 @@ class JobLogHandler(logging.Handler):
         job_logs[self.job_id].append(line)
 
 
-def _run_job(job_id: str, folder_path: str, included_files: List[str] | None) -> None:
+def _run_job(
+    job_id: str,
+    folder_path: str,
+    included_files: List[str] | None,
+    enable_ai: bool = False,
+) -> None:
     """Wrapper that attaches a per-job log handler before running analysis."""
     handler = JobLogHandler(job_id)
     handler.setLevel(logging.INFO)
@@ -92,10 +98,21 @@ def _run_job(job_id: str, folder_path: str, included_files: List[str] | None) ->
     analyzer_logger.addHandler(handler)
     job_logs[job_id].append(
         f"{datetime.now().strftime('%H:%M:%S')} I Job started for {folder_path}"
+        f"{' (AI on)' if enable_ai else ''}"
     )
+    # Set ENABLE_AI for this thread tree via env so analyzer.py picks it up.
+    import os as _os
+    prev = _os.environ.get("ENABLE_AI")
+    if enable_ai:
+        _os.environ["ENABLE_AI"] = "1"
     try:
         analyze_folder(job_id, folder_path, jobs, included_files)
     finally:
+        if enable_ai:
+            if prev is None:
+                _os.environ.pop("ENABLE_AI", None)
+            else:
+                _os.environ["ENABLE_AI"] = prev
         analyzer_logger.removeHandler(handler)
         job_logs[job_id].append(
             f"{datetime.now().strftime('%H:%M:%S')} I Job finished"
@@ -151,7 +168,7 @@ def create_job(body: CreateJobRequest) -> AnalysisJob:
     jobs[job.id] = job
 
     _executor.submit(
-        _run_job, job.id, job.folder_path, body.included_files,
+        _run_job, job.id, job.folder_path, body.included_files, body.enable_ai,
     )
     logger.info(
         "Created job %s for %s (included_files=%s)",
@@ -248,6 +265,58 @@ def get_logs(job_id: str, since: int = 0) -> Dict[str, Any]:
     return {"lines": new_lines, "total": total}
 
 
+@app.get(
+    "/jobs/{job_id}/ai-debug",
+    summary="What did AI extract for this job? Quick visibility into pipeline output.",
+)
+def ai_debug(job_id: str) -> Dict[str, Any]:
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    clips = []
+    n_with_words = 0
+    n_with_seq = 0
+    n_dialogue_trimmed = 0
+    for c in job.clips:
+        s = c.scores
+        word_count = len(s.words or [])
+        if word_count > 0:
+            n_with_words += 1
+        if s.sequence_position is not None:
+            n_with_seq += 1
+        if s.dialogue_trimmed:
+            n_dialogue_trimmed += 1
+        clips.append({
+            "clip_id": c.clip_id,
+            "filename": c.filename,
+            "duration_sec": s.duration_sec,
+            "ai_segment": s.ai_segment,
+            "ai_quality": s.ai_quality,
+            "ai_caption": s.ai_caption,
+            "ai_in_sec": s.ai_in_sec,
+            "ai_out_sec": s.ai_out_sec,
+            "dialogue_trimmed": s.dialogue_trimmed,
+            "word_count": word_count,
+            "transcript_chars": len(s.transcript or ""),
+            "rank_in_group": s.rank_in_group,
+            "sequence_position": s.sequence_position,
+            "approved": c.approved,
+        })
+
+    return {
+        "job_id": job_id,
+        "ai_ran": any(c["ai_quality"] is not None for c in clips),
+        "summary": {
+            "total_clips": len(clips),
+            "clips_with_words": n_with_words,
+            "clips_dialogue_trimmed": n_dialogue_trimmed,
+            "clips_with_sequence_pos": n_with_seq,
+        },
+        "clips": clips,
+    }
+
+
 # ─────────────────────────── Clip updates ────────────────────────────────────
 
 @app.patch(
@@ -272,9 +341,119 @@ def update_clip(
         clip.approved = body.approved
     if body.segment_label is not None:
         clip.segment_label = body.segment_label
+    if body.sequence_position is not None:
+        clip.scores.sequence_position = max(1, int(body.sequence_position))
+    if body.ai_in_sec is not None:
+        clip.scores.ai_in_sec = max(0.0, float(body.ai_in_sec))
+    if body.ai_out_sec is not None:
+        clip.scores.ai_out_sec = max(
+            (clip.scores.ai_in_sec or 0.0) + 0.1,
+            float(body.ai_out_sec),
+        )
 
     jobs[job_id] = job
     return clip
+
+
+# ─────────────────────────── Speaker names ───────────────────────────────────
+
+@app.get(
+    "/jobs/{job_id}/speakers",
+    summary="Read speaker name mapping for this job",
+)
+def get_speakers(job_id: str) -> Dict[str, str]:
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job.speaker_names
+
+
+@app.put(
+    "/jobs/{job_id}/speakers",
+    summary="Replace speaker name mapping (e.g. 'speaker_1' -> 'John')",
+)
+def put_speakers(
+    job_id: str, body: UpdateSpeakerNamesRequest,
+) -> Dict[str, str]:
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job.speaker_names = body.speaker_names
+    jobs[job_id] = job
+    return job.speaker_names
+
+
+# ─────────────────────────── Sequence transcript ─────────────────────────────
+
+@app.get(
+    "/jobs/{job_id}/sequence",
+    summary="Whole-job sequence: clips in timeline order with transcripts",
+)
+def get_sequence(job_id: str) -> Dict[str, Any]:
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    items: list[Dict[str, Any]] = []
+    detected_speakers: set[int] = set()
+
+    # Order: by segment chronology, then sequence_position within
+    from fcpxml_export import SEGMENT_ORDER as _SEG_ORDER
+
+    def seg_index(seg: str) -> int:
+        try:
+            return _SEG_ORDER.index(seg)
+        except ValueError:
+            return len(_SEG_ORDER)
+
+    sorted_clips = sorted(
+        job.clips,
+        key=lambda c: (
+            seg_index(c.segment_label or "Backup"),
+            c.scores.sequence_position if c.scores.sequence_position is not None else 1_000_000,
+            c.path.lower(),
+        ),
+    )
+
+    for i, c in enumerate(sorted_clips, start=1):
+        s = c.scores
+        words_payload = []
+        for w in (s.words or []):
+            if w.speaker_tag:
+                detected_speakers.add(w.speaker_tag)
+            words_payload.append({
+                "word": w.word,
+                "start_sec": w.start_sec,
+                "end_sec": w.end_sec,
+                "speaker_tag": w.speaker_tag,
+            })
+        items.append({
+            "clip_id": c.clip_id,
+            "filename": c.filename,
+            "segment": c.segment_label,
+            "clip_type": s.clip_type,
+            "duration_sec": s.duration_sec,
+            "ai_in_sec": s.ai_in_sec,
+            "ai_out_sec": s.ai_out_sec,
+            "ai_quality": s.ai_quality,
+            "ai_caption": s.ai_caption,
+            "transcript": s.transcript,
+            "words": words_payload,
+            "sequence_position": s.sequence_position,
+            "placement_confidence": s.placement_confidence,
+            "approved": c.approved,
+            "rank_in_group": s.rank_in_group,
+            "thumbnail_url": f"/thumbnails/{job.id}/{c.clip_id}",
+            "stream_url": f"/clips/{job.id}/{c.clip_id}",
+            "timeline_position": i,
+        })
+
+    return {
+        "job_id": job.id,
+        "speaker_tags": sorted(detected_speakers),
+        "speaker_names": job.speaker_names,
+        "items": items,
+    }
 
 
 # ─────────────────────────── Bulk auto-approve ───────────────────────────────
@@ -289,7 +468,19 @@ def approve_all(job_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="Job not found")
     approved = rejected = 0
     for clip in job.clips:
-        good = clip.scores.shake_score < 0.4 and clip.scores.blur_score < 0.4 and clip.scores.exposure_ok
+        s = clip.scores
+        # AI is authoritative when it ran. Heuristics often misjudge cinematic
+        # footage (gimbal moves register as "shaky", shallow DoF as "blurry"),
+        # so we trust Gemini's quality + skip when present.
+        if s.ai_quality is not None:
+            good = (not s.ai_skip) and (s.ai_quality >= 5.0)
+        else:
+            # Looser fallback thresholds when AI didn't run
+            good = (
+                s.shake_score < 0.5
+                and s.blur_score < 0.85
+                and s.exposure_ok
+            )
         clip.approved = good
         if good:
             approved += 1
@@ -364,10 +555,19 @@ def export_fcpxml(job_id: str, body: FcpxmlExportRequest) -> Dict[str, Any]:
 
     try:
         written_path = export_to_fcpxml(job=job, output_path=body.output_path)
+        # Side-write an SRT subtitle file for any NLE
+        srt_path = ""
+        try:
+            from srt_export import export_srt
+            srt_target = str(Path(written_path).with_suffix(".srt"))
+            srt_path = export_srt(job=job, output_path=srt_target)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("SRT export failed (non-fatal): %s", exc)
         return {
             "success": True,
             "export_type": "fcpxml",
             "output_path": written_path,
+            "subtitle_path": srt_path or None,
             "clips_exported": len(approved),
         }
     except Exception as exc:  # noqa: BLE001

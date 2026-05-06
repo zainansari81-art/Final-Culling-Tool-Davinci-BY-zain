@@ -7,6 +7,7 @@ import {
   Film,
   Loader2,
   Sparkles,
+  Wand2,
 } from 'lucide-react'
 import { api } from '../api'
 import type { AnalysisJob } from '../types'
@@ -19,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 
 type WizardStep = 'pick' | 'analyzing' | 'review'
@@ -50,6 +52,7 @@ export default function HomePage() {
   const [includedFiles, setIncludedFiles] = useState<string[] | null>(null)
   const [selectedCount, setSelectedCount] = useState(0)
   const [activeJob, setActiveJob] = useState<AnalysisJob | null>(null)
+  const [enableAi, setEnableAi] = useState(false)
 
   const loadJobs = async () => {
     try {
@@ -95,6 +98,7 @@ export default function HomePage() {
       const job = await api.createJob({
         folder_path: folderPath,
         included_files: includedFiles ?? undefined,
+        enable_ai: enableAi,
       })
       setActiveJob(job)
       setOpenStep('analyzing')
@@ -191,10 +195,30 @@ export default function HomePage() {
                   }}
                 />
                 <Separator />
+                <label className="flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors hover:bg-accent/30">
+                  <Switch
+                    checked={enableAi}
+                    onCheckedChange={setEnableAi}
+                    disabled={submitting}
+                    className="mt-0.5"
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-1.5 text-sm font-medium">
+                      <Wand2 className="h-3.5 w-3.5" />
+                      Vertex AI analysis
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Adds Video Intelligence + Gemini per clip — semantic segment
+                      tagging, captions, quality score, suggested in/out points.
+                      Slower (~30s/clip after upload) and uses your GCP quota.
+                    </p>
+                  </div>
+                </label>
+                <Separator />
                 <div className="flex items-center justify-between gap-3 px-4 py-3">
                   <p className="text-xs text-muted-foreground">
                     {selectedCount > 0
-                      ? `Ready to analyze ${selectedCount} clip${selectedCount === 1 ? '' : 's'}.`
+                      ? `Ready to analyze ${selectedCount} clip${selectedCount === 1 ? '' : 's'}${enableAi ? ' with AI' : ''}.`
                       : 'Select at least one clip to continue.'}
                   </p>
                   {error && (
@@ -211,7 +235,11 @@ export default function HomePage() {
                       </>
                     ) : (
                       <>
-                        <Sparkles className="h-4 w-4" />
+                        {enableAi ? (
+                          <Wand2 className="h-4 w-4" />
+                        ) : (
+                          <Sparkles className="h-4 w-4" />
+                        )}
                         Run analysis
                       </>
                     )}

@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Clapperboard,
   Download,
+  ListOrdered,
   Sparkles,
 } from 'lucide-react'
 import { api } from '../api'
@@ -124,14 +125,19 @@ export default function JobPage() {
     [clips],
   )
 
+  const isShakyVisible = (c: ClipResult) =>
+    (c.ai_quality ?? 0) < 7 && c.shake_score > 0.35
+  const isBlurryVisible = (c: ClipResult) =>
+    (c.ai_quality ?? 0) < 7 && c.blur_score > 0.85
+
   const tabCounts = useMemo(
     (): Record<FilterTab, number> => ({
       all: clips.length,
       unreviewed: clips.filter((c) => c.approved === null).length,
       approved: clips.filter((c) => c.approved === true).length,
       rejected: clips.filter((c) => c.approved === false).length,
-      shaky: clips.filter((c) => c.shake_score > 0.15).length,
-      blurry: clips.filter((c) => c.blur_score > 0.7).length,
+      shaky: clips.filter(isShakyVisible).length,
+      blurry: clips.filter(isBlurryVisible).length,
       duplicates: clips.filter((c) => c.is_duplicate).length,
     }),
     [clips],
@@ -159,10 +165,10 @@ export default function JobPage() {
         list = list.filter((c) => c.approved === false)
         break
       case 'shaky':
-        list = list.filter((c) => c.shake_score > 0.15)
+        list = list.filter(isShakyVisible)
         break
       case 'blurry':
-        list = list.filter((c) => c.blur_score > 0.7)
+        list = list.filter(isBlurryVisible)
         break
       case 'duplicates':
         list = list.filter((c) => c.is_duplicate)
@@ -279,6 +285,12 @@ export default function JobPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link to={`/jobs/${id}/sequence`}>
+                <ListOrdered className="h-3.5 w-3.5" />
+                Sequence
+              </Link>
+            </Button>
             {approveAllState === 'done' ? (
               <Badge
                 variant="secondary"

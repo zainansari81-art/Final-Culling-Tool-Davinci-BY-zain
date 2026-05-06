@@ -22,6 +22,7 @@ Thumbs.db
 backend/thumbnails/
 backend/jobs/
 backend/uploads/
+graphify-out/
 *.pid
 
 # Editor
