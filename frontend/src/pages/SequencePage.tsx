@@ -442,11 +442,11 @@ function ClipRow({
   const trimStartPct = trim[0] / Math.max(0.01, item.duration_sec) * 100
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border/70 bg-card transition-colors hover:border-border">
+    <div className="overflow-hidden rounded-md border border-border/40 bg-card transition-colors hover:border-border">
       {/* Compact summary row — always visible */}
       <div className="flex items-stretch">
         {/* Reorder column */}
-        <div className="flex w-9 shrink-0 flex-col items-center justify-center gap-0.5 border-r border-border/70 bg-muted/30 py-2">
+        <div className="flex w-7 shrink-0 flex-col items-center justify-center gap-0.5 border-r border-border/40 bg-muted/30 py-1">
           <Button
             variant="ghost"
             size="icon"
@@ -476,7 +476,7 @@ function ClipRow({
         <button
           type="button"
           onClick={onToggle}
-          className="hidden w-32 shrink-0 overflow-hidden bg-muted sm:block"
+          className="hidden w-24 shrink-0 overflow-hidden bg-muted sm:block"
         >
           <img
             src={`${BASE_URL}${item.thumbnail_url}`}

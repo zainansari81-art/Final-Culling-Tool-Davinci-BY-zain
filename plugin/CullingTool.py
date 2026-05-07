@@ -176,6 +176,83 @@ def _err_dialog(msg: str) -> None:
             pass
 
 
+# ─────────────────────────── Resolve tier + WI install ─────────────────────
+
+def _resolve_is_studio(resolve: object) -> bool:
+    """True when the running Resolve is the paid Studio edition."""
+    try:
+        name = resolve.GetProductName() if hasattr(resolve, "GetProductName") else ""
+        return "Studio" in (name or "")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _wi_install_dir() -> Path:
+    sysname = platform.system()
+    home = Path.home()
+    if sysname == "Darwin":
+        return (
+            home
+            / "Library"
+            / "Application Support"
+            / "Blackmagic Design"
+            / "DaVinci Resolve"
+            / "Workflow Integration Plugins"
+            / "CullingTool"
+        )
+    if sysname == "Windows":
+        appdata = Path(os.environ.get("APPDATA", str(home / "AppData" / "Roaming")))
+        return (
+            appdata
+            / "Blackmagic Design"
+            / "DaVinci Resolve"
+            / "Workflow Integration Plugins"
+            / "CullingTool"
+        )
+    return home / ".local" / "share" / "DaVinciResolveWorkflowIntegrationPlugins" / "CullingTool"
+
+
+def _maybe_install_workflow_integration(resolve: object) -> None:
+    """On Studio, copy the WI panel files (manifest.xml + index.html) into
+    Resolve's Workflow Integration Plugins folder. Idempotent — overwrites
+    on every run so updates ship cleanly. Free Resolve = no-op."""
+    if not _resolve_is_studio(resolve):
+        return
+    repo = _find_repo_root()
+    if repo is None:
+        return
+    src_dir = repo / "plugin" / "workflow-integration"
+    if not src_dir.is_dir():
+        return
+    dst = _wi_install_dir()
+    try:
+        dst.mkdir(parents=True, exist_ok=True)
+        for fname in ("manifest.xml", "index.html"):
+            src_f = src_dir / fname
+            if src_f.exists():
+                (dst / fname).write_text(src_f.read_text())
+    except Exception:  # noqa: BLE001
+        return
+    # First-install marker so we only nag the user once.
+    flag = CACHE_DIR / "wi_installed.flag"
+    if not flag.exists():
+        try:
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            flag.write_text("ok")
+            _err_dialog(
+                "DaVinci Resolve Studio detected.\n\n"
+                "Workflow Integration panel installed at:\n"
+                f"  {dst}\n\n"
+                "To dock the tool inside Resolve:\n"
+                "  1. Quit Resolve.\n"
+                "  2. Reopen it.\n"
+                "  3. Workspace > Workflow Integrations > Wedding Culling Tool.\n\n"
+                "Until then this run will open in a chrome-less window."
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+
 # ─────────────────────────── Media Pool scan ────────────────────────────────
 
 def _scan_media_pool() -> Tuple[Optional[str], List[str]]:
@@ -192,6 +269,12 @@ def _scan_media_pool() -> Tuple[Optional[str], List[str]]:
         return None, []
     if not resolve:
         return None, []
+    # Studio detection — install the dockable Workflow Integration panel
+    # the first time we see Studio so the user doesn't need a manual cp.
+    try:
+        _maybe_install_workflow_integration(resolve)
+    except Exception:  # noqa: BLE001
+        pass
     pm = resolve.GetProjectManager()
     if not pm:
         return None, []

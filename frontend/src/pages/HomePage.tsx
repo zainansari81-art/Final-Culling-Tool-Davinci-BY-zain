@@ -57,7 +57,10 @@ export default function HomePage() {
   const enableAi = true
   const [aiInfo, setAiInfo] = useState<AiInfo | null>(null)
   const [newSessionOpen, setNewSessionOpen] = useState(false)
-  const [sourceMode, setSourceMode] = useState<'folder' | 'resolve'>('folder')
+  // Folder picker is hidden in v1 — Session = Resolve Media Pool only.
+  // Kept the state shape so the legacy code paths still type-check; the
+  // toggle UI just isn't rendered.
+  const [sourceMode] = useState<'folder' | 'resolve'>('resolve')
   const [resolveClips, setResolveClips] = useState<{ path: string; name: string }[]>([])
   const [resolveProject, setResolveProject] = useState<string>('')
   const [resolvePicked, setResolvePicked] = useState<Set<string>>(new Set())
@@ -356,47 +359,27 @@ export default function HomePage() {
       </div>
 
       {/* New session dialog */}
-      <Dialog open={newSessionOpen} onOpenChange={setNewSessionOpen}>
+      <Dialog
+        open={newSessionOpen}
+        onOpenChange={(open) => {
+          setNewSessionOpen(open)
+          if (open && resolveClips.length === 0 && !resolveLoading) {
+            loadResolveClips()
+          }
+        }}
+      >
         <DialogContent
-          className="flex h-[78vh] w-[min(720px,94vw)] flex-col gap-0 overflow-hidden border border-border/70 bg-card p-0 shadow-2xl shadow-black/60 sm:max-w-[720px]"
+          className="flex h-[78vh] w-[min(720px,94vw)] flex-col gap-0 overflow-hidden border border-border/40 bg-card p-0 shadow-2xl shadow-black/70 sm:max-w-[720px]"
           showCloseButton
         >
-          <DialogHeader className="border-b border-border bg-panel-header px-4 py-3">
+          <DialogHeader className="border-b border-border/50 bg-panel-header px-4 py-3">
             <DialogTitle className="text-[13.5px] font-semibold tracking-tight">
               New session
             </DialogTitle>
             <DialogDescription className="text-[12px]">
-              Pick a folder of clips, optionally enable AI, then run analysis.
+              Pick clips from the active Resolve project's Media Pool, then run analysis.
             </DialogDescription>
           </DialogHeader>
-
-          <div className="flex border-b border-border bg-panel-header text-[12px]">
-            <button
-              onClick={() => setSourceMode('folder')}
-              className={cn(
-                'flex-1 px-4 py-2 transition-colors',
-                sourceMode === 'folder'
-                  ? 'border-b-2 border-[var(--primary)] text-foreground'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              Folder
-            </button>
-            <button
-              onClick={() => {
-                setSourceMode('resolve')
-                if (resolveClips.length === 0 && !resolveLoading) loadResolveClips()
-              }}
-              className={cn(
-                'flex-1 px-4 py-2 transition-colors',
-                sourceMode === 'resolve'
-                  ? 'border-b-2 border-[var(--primary)] text-foreground'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              Resolve Media Pool
-            </button>
-          </div>
 
           <div className="min-h-0 flex-1 overflow-hidden">
             {sourceMode === 'folder' ? (

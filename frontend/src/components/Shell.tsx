@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
+  ArrowRight,
   Cpu,
   Film,
   FolderOpen,
@@ -16,6 +17,13 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
   Sheet,
   SheetContent,
   SheetTitle,
@@ -23,7 +31,7 @@ import {
 import { api, type AiInfo } from '../api'
 import { cn } from '@/lib/utils'
 
-type TabKey = 'library' | 'review' | 'sequence' | 'settings'
+type TabKey = 'library' | 'review' | 'sequence' | 'push'
 
 interface ShellProps {
   /** Optional content for the contextual left sidebar. */
@@ -65,10 +73,10 @@ export default function Shell({
   const activeTab: TabKey = location.pathname.startsWith('/jobs/')
     ? location.pathname.endsWith('/sequence')
       ? 'sequence'
-      : 'review'
-    : location.pathname === '/settings'
-      ? 'settings'
-      : 'library'
+      : location.pathname.endsWith('/push')
+        ? 'push'
+        : 'review'
+    : 'library'
 
   // Capture last visited job for Review/Sequence tabs
   const jobIdMatch = location.pathname.match(/^\/jobs\/([^/]+)/)
@@ -90,14 +98,16 @@ export default function Shell({
       case 'sequence':
         navigate(last ? `/jobs/${last}/sequence` : '/')
         break
-      case 'settings':
-        navigate('/settings')
+      case 'push':
+        navigate(last ? `/jobs/${last}/push` : '/')
         break
     }
   }
 
   const reviewDisabled = !lastJobIdRef.current
   const sequenceDisabled = !lastJobIdRef.current
+  const pushDisabled = !lastJobIdRef.current
+  const [settingsOpen, setSettingsOpen] = React.useState(false)
 
   return (
     <div className="flex h-svh min-h-0 flex-col bg-background text-foreground">
@@ -168,9 +178,13 @@ export default function Shell({
               <ListOrdered className="h-3.5 w-3.5" />
               Sequence
             </TabsTrigger>
-            <TabsTrigger value="settings" className="gap-1.5 px-3 text-[12px]">
-              <Settings className="h-3.5 w-3.5" />
-              Settings
+            <TabsTrigger
+              value="push"
+              disabled={pushDisabled}
+              className="gap-1.5 px-3 text-[12px]"
+            >
+              <ArrowRight className="h-3.5 w-3.5" />
+              Push
             </TabsTrigger>
           </TabsList>
         </Tabs>
@@ -181,6 +195,7 @@ export default function Shell({
             <TabsTrigger value="library" className="px-2 text-[11px]">Sess</TabsTrigger>
             <TabsTrigger value="review" disabled={reviewDisabled} className="px-2 text-[11px]">Review</TabsTrigger>
             <TabsTrigger value="sequence" disabled={sequenceDisabled} className="px-2 text-[11px]">Seq</TabsTrigger>
+            <TabsTrigger value="push" disabled={pushDisabled} className="px-2 text-[11px]">Push</TabsTrigger>
           </TabsList>
         </Tabs>
 
@@ -221,6 +236,16 @@ export default function Shell({
             variant="ghost"
             size="icon"
             className="h-8 w-8"
+            onClick={() => setSettingsOpen(true)}
+            aria-label="Settings"
+            title="Settings"
+          >
+            <Settings className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
             onClick={() => setMaxOpen((v) => !v)}
             aria-label="Toggle max"
             title={maxOpen ? 'Compact mode' : 'Expand to full screen'}
@@ -233,6 +258,44 @@ export default function Shell({
           </Button>
         </div>
       </header>
+
+      {/* SETTINGS DIALOG */}
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogContent className="border border-border/40 bg-card sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Settings</DialogTitle>
+            <DialogDescription>
+              Active engine + cloud credentials. Use the Sessions screen to
+              re-onboard.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-[12.5px]">
+            <div className="flex items-center justify-between rounded-md border border-border/40 bg-muted/30 px-3 py-2">
+              <span className="text-muted-foreground">Backend</span>
+              <span className="font-medium">{aiInfo?.label ?? 'Offline'}</span>
+            </div>
+            {aiInfo?.vlm_model && (
+              <div className="flex items-center justify-between rounded-md border border-border/40 bg-muted/30 px-3 py-2">
+                <span className="text-muted-foreground">Model</span>
+                <span className="truncate font-mono text-[11px]">
+                  {aiInfo.vlm_model}
+                </span>
+              </div>
+            )}
+            <div className="flex items-center justify-between rounded-md border border-border/40 bg-muted/30 px-3 py-2">
+              <span className="text-muted-foreground">Credentials</span>
+              <span className="font-medium">
+                {aiInfo?.has_key ? 'Stored' : 'Not configured'}
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              To switch backend or rotate keys, run the onboarding wizard from
+              Sessions or restart the backend with{' '}
+              <code className="rounded bg-muted px-1">AI_BACKEND=cloud</code>.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* BODY */}
       <div
