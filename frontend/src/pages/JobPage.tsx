@@ -4,9 +4,10 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
-  Clapperboard,
   Download,
+  FolderOpen,
   ListOrdered,
+  Search,
   Sparkles,
 } from 'lucide-react'
 import { api } from '../api'
@@ -16,13 +17,15 @@ import BackendError from '../components/BackendError'
 import ClipCard from '../components/ClipCard'
 import ExportModal from '../components/ExportModal'
 import ProgressPage from './ProgressPage'
-import { Badge } from '@/components/ui/badge'
+import {
+  HudFrame,
+  HudPill,
+  HudReadout,
+  HudTitleBar,
+  SegProgress,
+} from '../components/Hud'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 
 const PAGE_SIZE = 50
@@ -38,14 +41,14 @@ type FilterTab =
   | 'duplicates'
 
 const FILTER_TABS: { key: FilterTab; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'unreviewed', label: 'Unreviewed' },
-  { key: 'approved', label: 'Approved' },
-  { key: 'near_miss', label: 'Near miss' },
-  { key: 'rejected', label: 'Rejected' },
-  { key: 'shaky', label: 'Shaky' },
-  { key: 'blurry', label: 'Blurry' },
-  { key: 'duplicates', label: 'Duplicates' },
+  { key: 'all', label: 'ALL' },
+  { key: 'unreviewed', label: 'UNREVIEWED' },
+  { key: 'approved', label: 'KEEP' },
+  { key: 'near_miss', label: 'NEAR' },
+  { key: 'rejected', label: 'CUT' },
+  { key: 'shaky', label: 'SHAKY' },
+  { key: 'blurry', label: 'BLURRY' },
+  { key: 'duplicates', label: 'DUPS' },
 ]
 
 export default function JobPage() {
@@ -197,8 +200,7 @@ export default function JobPage() {
       const idx = pagedClips.findIndex((c) => c.id === selectedClipId)
       if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
         e.preventDefault()
-        if (idx < pagedClips.length - 1)
-          setSelectedClipId(pagedClips[idx + 1].id)
+        if (idx < pagedClips.length - 1) setSelectedClipId(pagedClips[idx + 1].id)
       }
       if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
         e.preventDefault()
@@ -231,18 +233,21 @@ export default function JobPage() {
 
   if (loading)
     return (
-      <div className="flex min-h-svh items-center justify-center text-sm text-muted-foreground">
-        Loading job…
+      <div className="flex min-h-svh items-center justify-center font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+        // LOADING SESSION ···
       </div>
     )
 
   if (notFound || !job)
     return (
       <div className="flex min-h-svh flex-col items-center justify-center gap-3 px-6 text-center">
+        <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-destructive">
+          // ERROR · 404 SESSION
+        </div>
         <h2 className="text-base font-semibold tracking-tight">Job not found</h2>
-        <p className="max-w-sm text-sm text-muted-foreground">
-          This job is no longer in memory. The backend was likely restarted —
-          jobs aren't persisted to disk yet. Start a new analysis from home.
+        <p className="max-w-sm text-[12px] text-muted-foreground">
+          This job is no longer in memory. Backend was likely restarted —
+          jobs aren't persisted to disk yet.
         </p>
         <Button asChild>
           <Link to="/">Go home</Link>
@@ -257,205 +262,321 @@ export default function JobPage() {
   const folderName = job.folder_path.split('/').filter(Boolean).pop() ?? job.id
   const reviewedPct =
     stats.total > 0 ? ((stats.approved + stats.rejected) / stats.total) * 100 : 0
+  const elapsed = (() => {
+    if (!job.started_at) return null
+    const end = job.completed_at
+      ? new Date(job.completed_at).getTime()
+      : Date.now()
+    const start = new Date(job.started_at).getTime()
+    const sec = Math.max(0, (end - start) / 1000)
+    const m = Math.floor(sec / 60)
+    const s = sec - m * 60
+    return m > 0 ? `${m}m${s.toFixed(0)}s` : `${s.toFixed(1)}s`
+  })()
 
   return (
-    <div className="min-h-svh bg-background">
-      <header className="panel-bar sticky top-0 z-20 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-5 py-2">
-          <div className="flex items-center gap-2">
+    <div className="min-h-svh">
+      {/* TOP BAR — breadcrumb + search + actions */}
+      <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur-md">
+        <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-4 px-5 py-2.5">
+          <div className="flex min-w-0 items-center gap-2">
             <Button asChild variant="ghost" size="icon" className="h-7 w-7">
               <Link to="/" aria-label="Back to home">
                 <ArrowLeft className="h-3.5 w-3.5" />
               </Link>
             </Button>
-            <div className="flex items-center gap-2 rounded-md border border-border/70 bg-muted/40 px-2 py-1">
-              <Clapperboard className="h-3.5 w-3.5 text-primary" />
-              <div className="font-mono text-[11px] font-medium" title={job.folder_path}>
+            <span className="tick" />
+            <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+              SESSIONS
+            </span>
+            <ChevronRight className="h-3 w-3 text-muted-foreground" />
+            <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+              REVIEW
+            </span>
+            <ChevronRight className="h-3 w-3 text-muted-foreground" />
+            <div
+              className="flex min-w-0 items-center gap-1.5 border border-border bg-muted/30 px-2 py-1"
+              title={job.folder_path}
+            >
+              <FolderOpen className="h-3 w-3 shrink-0 text-[var(--primary)]" />
+              <span className="truncate font-mono text-[11px] font-medium">
                 {folderName}
-              </div>
-            </div>
-            <Separator orientation="vertical" className="h-5" />
-            <div className="flex items-center gap-1.5 font-mono text-[11px]">
-              <span className="rounded-sm bg-muted/60 px-1.5 py-0.5 text-muted-foreground">
-                <span className="tabular-nums text-foreground">{stats.total}</span>
-                <span className="ml-1 uppercase tracking-wider text-[10px]">clips</span>
               </span>
-              <span className="rounded-sm bg-success/10 px-1.5 py-0.5 text-success">
-                <span className="tabular-nums">{stats.approved}</span>
-                <span className="ml-1 uppercase tracking-wider text-[10px] opacity-80">keep</span>
-              </span>
-              <span className="rounded-sm bg-destructive/10 px-1.5 py-0.5 text-destructive">
-                <span className="tabular-nums">{stats.rejected}</span>
-                <span className="ml-1 uppercase tracking-wider text-[10px] opacity-80">cut</span>
-              </span>
-              {(() => {
-                if (!job.started_at) return null
-                const end = job.completed_at
-                  ? new Date(job.completed_at).getTime()
-                  : Date.now()
-                const start = new Date(job.started_at).getTime()
-                const elapsed = Math.max(0, (end - start) / 1000)
-                const m = Math.floor(elapsed / 60)
-                const s = elapsed - m * 60
-                const txt = m > 0 ? `${m}m ${s.toFixed(1)}s` : `${s.toFixed(1)}s`
-                return (
-                  <span
-                    className="rounded-sm bg-muted/60 px-1.5 py-0.5 tabular-nums text-muted-foreground"
-                    title={
-                      job.completed_at
-                        ? `Total analysis time ${txt}`
-                        : `Running ${txt} so far`
-                    }
-                  >
-                    ⏱ {txt}
-                  </span>
-                )
-              })()}
             </div>
           </div>
+
           <div className="flex items-center gap-2">
-            <Button asChild variant="outline" size="sm">
+            <button
+              type="button"
+              className="hidden items-center gap-2 border border-border bg-muted/40 px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground md:inline-flex"
+            >
+              <Search className="h-3 w-3" />
+              <span>FIND CLIP</span>
+              <kbd className="ml-2 border border-border-strong px-1 py-px text-[9px]">
+                ⌘F
+              </kbd>
+            </button>
+
+            <Button asChild variant="outline" size="sm" className="h-7 gap-1.5 font-mono text-[11px] uppercase tracking-[0.14em]">
               <Link to={`/jobs/${id}/sequence`}>
-                <ListOrdered className="h-3.5 w-3.5" />
-                Sequence
+                <ListOrdered className="h-3 w-3" />
+                SEQUENCE
               </Link>
             </Button>
+
             {approveAllState === 'done' ? (
-              <Badge
-                variant="secondary"
-                className="bg-success/15 text-success"
-              >
-                ✓ Done
-              </Badge>
+              <HudPill tone="success">✓ DONE</HudPill>
             ) : (
-              <Button
-                variant="outline"
-                size="sm"
+              <button
+                type="button"
                 onClick={handleApproveAll}
                 disabled={approveAllState === 'loading'}
+                className="hud-cta-ghost"
               >
-                <Sparkles className="h-3.5 w-3.5" />
-                {approveAllState === 'loading' ? 'Running…' : 'Auto-approve'}
-              </Button>
+                <Sparkles className="h-3 w-3" />
+                {approveAllState === 'loading' ? 'RUNNING…' : 'AUTO-KEEP'}
+              </button>
             )}
-            <Button size="sm" onClick={() => setShowExport(true)}>
+
+            <button
+              className="hud-cta"
+              onClick={() => setShowExport(true)}
+            >
               <Download className="h-3.5 w-3.5" />
-              Export
-            </Button>
+              EXPORT TO RESOLVE
+            </button>
           </div>
         </div>
-        <div className="mx-auto max-w-7xl px-6 pb-2">
-          <Progress value={reviewedPct} className="h-1" />
+
+        {/* sub-readout strip */}
+        <div className="mx-auto flex max-w-[1500px] items-center gap-6 border-t border-border/60 px-5 py-2">
+          <HudReadout
+            label="Total"
+            value={stats.total.toString().padStart(3, '0')}
+            hint="CLIPS"
+          />
+          <HudReadout
+            label="Keep"
+            value={stats.approved.toString().padStart(3, '0')}
+            hint="APPROVED"
+            accent="success"
+          />
+          <HudReadout
+            label="Cut"
+            value={stats.rejected.toString().padStart(3, '0')}
+            hint="REJECTED"
+            accent="destructive"
+          />
+          <HudReadout
+            label="Pending"
+            value={stats.unreviewed.toString().padStart(3, '0')}
+            hint="UNREVIEWED"
+            accent="warning"
+          />
+          {elapsed && (
+            <HudReadout
+              label="Run-time"
+              value={elapsed}
+              hint="ANALYSIS"
+            />
+          )}
+          <div className="ml-auto flex flex-1 items-center gap-3">
+            <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+              REVIEW PROGRESS
+            </span>
+            <SegProgress value={reviewedPct} segments={48} className="flex-1" />
+            <span className="font-mono text-[11px] tabular-nums text-foreground">
+              {Math.round(reviewedPct)}%
+            </span>
+          </div>
         </div>
       </header>
 
-      <div className="mx-auto flex max-w-7xl gap-6 px-6 py-6">
-        <aside className="sticky top-[5.25rem] hidden h-fit w-56 shrink-0 lg:block">
-          <h3 className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-            Segments
-          </h3>
-          <div className="space-y-0.5">
-            {presentSegments.map((seg) => {
-              const checked = activeSegments.has(seg)
-              return (
-                <label
-                  key={seg}
-                  className={cn(
-                    'flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent',
-                    checked && 'bg-accent',
-                  )}
+      <div className="mx-auto flex max-w-[1500px] gap-4 px-5 py-5">
+        {/* LEFT RAIL: filters + segments */}
+        <aside className="hidden w-64 shrink-0 flex-col gap-4 lg:flex">
+          {/* Filter list */}
+          <HudFrame>
+            <HudTitleBar label="FILTER" />
+            <div className="flex flex-col">
+              {FILTER_TABS.map((tab) => {
+                const active = activeFilter === tab.key
+                const count = tabCounts[tab.key]
+                return (
+                  <button
+                    key={tab.key}
+                    onClick={() => {
+                      setActiveFilter(tab.key)
+                      setPage(0)
+                    }}
+                    className={cn(
+                      'group flex items-center justify-between border-l-2 px-3 py-2 text-left font-mono text-[11px] uppercase tracking-[0.14em] transition-colors',
+                      active
+                        ? 'border-l-[var(--primary)] bg-primary/10 text-foreground'
+                        : 'border-l-transparent text-muted-foreground hover:bg-accent/30 hover:text-foreground',
+                    )}
+                  >
+                    <span>{tab.label}</span>
+                    <span
+                      className={cn(
+                        'tabular-nums',
+                        active ? 'text-[var(--primary)]' : 'text-muted-foreground/70',
+                      )}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </HudFrame>
+
+          {/* Segments */}
+          <HudFrame>
+            <HudTitleBar
+              label="SEGMENTS"
+              meta={`${presentSegments.length} ACTIVE`}
+            />
+            <div className="flex flex-col">
+              {presentSegments.map((seg) => {
+                const checked = activeSegments.has(seg)
+                const segIdx = SEGMENTS.indexOf(seg)
+                const segColor = `var(--tag-${(segIdx % 8) + 1})`
+                return (
+                  <button
+                    key={seg}
+                    onClick={() => toggleSegment(seg)}
+                    className={cn(
+                      'group flex items-center gap-2 border-l-2 px-3 py-2 text-left font-mono text-[11px] transition-colors',
+                      checked
+                        ? 'bg-accent/40 text-foreground'
+                        : 'border-l-transparent text-muted-foreground hover:bg-accent/20 hover:text-foreground',
+                    )}
+                    style={{
+                      borderLeftColor: checked ? segColor : 'transparent',
+                    }}
+                  >
+                    <span
+                      className="h-2 w-2 shrink-0"
+                      style={{ background: segColor }}
+                    />
+                    <span className="flex-1 truncate uppercase tracking-[0.06em]">
+                      {seg}
+                    </span>
+                    <span className="tabular-nums text-muted-foreground/70">
+                      {segmentCounts[seg] ?? 0}
+                    </span>
+                  </button>
+                )
+              })}
+              {presentSegments.length === 0 && (
+                <div className="hud-hatch px-3 py-6 text-center font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  NO SEGMENTS
+                </div>
+              )}
+              {activeSegments.size > 0 && (
+                <button
+                  onClick={() => {
+                    setActiveSegments(new Set())
+                    setPage(0)
+                  }}
+                  className="border-t border-border px-3 py-2 text-left font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--primary)] hover:bg-primary/5"
                 >
-                  <Checkbox
-                    checked={checked}
-                    onCheckedChange={() => toggleSegment(seg)}
-                  />
-                  <span className="flex-1 truncate">{seg}</span>
-                  <span className="text-xs tabular-nums text-muted-foreground">
-                    {segmentCounts[seg] ?? 0}
-                  </span>
-                </label>
-              )
-            })}
-            {presentSegments.length === 0 && (
-              <p className="px-2 text-xs text-muted-foreground">
-                No segments yet.
-              </p>
-            )}
-            {activeSegments.size > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="mt-1 w-full justify-start text-xs text-muted-foreground"
-                onClick={() => {
-                  setActiveSegments(new Set())
-                  setPage(0)
-                }}
-              >
-                Clear filter
-              </Button>
-            )}
-          </div>
+                  × CLEAR FILTER
+                </button>
+              )}
+            </div>
+          </HudFrame>
+
+          {/* Hotkeys reference */}
+          <HudFrame>
+            <HudTitleBar label="HOTKEYS" />
+            <div className="grid grid-cols-2 gap-2 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em]">
+              <Key k="A" v="KEEP" />
+              <Key k="R" v="CUT" />
+              <Key k="N" v="NEAR" />
+              <Key k="1-9" v="SEGMENT" />
+              <Key k="←/→" v="NAVIGATE" />
+              <Key k="⌘F" v="FIND" />
+            </div>
+          </HudFrame>
         </aside>
 
+        {/* MAIN: clip grid */}
         <main className="min-w-0 flex-1">
-          <Tabs
-            value={activeFilter}
-            onValueChange={(v) => {
-              setActiveFilter(v as FilterTab)
-              setPage(0)
-            }}
-            className="mb-4"
-          >
-            <ScrollArea className="w-full">
-              <TabsList className="h-9">
-                {FILTER_TABS.map((tab) => (
-                  <TabsTrigger key={tab.key} value={tab.key} className="gap-1.5">
-                    {tab.label}
-                    {tabCounts[tab.key] > 0 && (
-                      <Badge
-                        variant="secondary"
-                        className="h-4 min-w-4 px-1 text-[10px] font-medium"
-                      >
-                        {tabCounts[tab.key]}
-                      </Badge>
-                    )}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </ScrollArea>
-          </Tabs>
+          {/* mobile filter strip */}
+          <ScrollArea className="mb-3 lg:hidden">
+            <div className="flex gap-1.5 pb-2">
+              {FILTER_TABS.map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => {
+                    setActiveFilter(tab.key)
+                    setPage(0)
+                  }}
+                  className={cn(
+                    'flex shrink-0 items-center gap-1.5 border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.14em]',
+                    activeFilter === tab.key
+                      ? 'border-primary bg-primary/15 text-[var(--primary)]'
+                      : 'border-border text-muted-foreground',
+                  )}
+                >
+                  {tab.label}
+                  <span className="tabular-nums opacity-70">
+                    {tabCounts[tab.key]}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </ScrollArea>
 
-          <div className="mb-3 flex items-center justify-between text-xs text-muted-foreground">
-            <span>
-              {filteredClips.length} clip
-              {filteredClips.length !== 1 ? 's' : ''}
-            </span>
-            <span>
-              <kbd className="rounded border border-border bg-muted px-1 py-0.5 text-[10px]">
-                A
-              </kbd>{' '}
-              approve ·{' '}
-              <kbd className="rounded border border-border bg-muted px-1 py-0.5 text-[10px]">
-                R
-              </kbd>{' '}
-              reject ·{' '}
-              <kbd className="rounded border border-border bg-muted px-1 py-0.5 text-[10px]">
-                N
-              </kbd>{' '}
-              near miss ·{' '}
-              <kbd className="rounded border border-border bg-muted px-1 py-0.5 text-[10px]">
-                1–9
-              </kbd>{' '}
-              segment
-            </span>
+          {/* result count + paginator */}
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+              <span>
+                <span className="tabular-nums text-foreground">
+                  {filteredClips.length.toString().padStart(3, '0')}
+                </span>
+                {' '}MATCHES
+              </span>
+              {activeSegments.size > 0 && (
+                <span className="text-[var(--primary)]">
+                  · {activeSegments.size} SEG FILTER
+                </span>
+              )}
+            </div>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                <button
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  disabled={page === 0}
+                  className="border border-border-strong p-1 disabled:opacity-30 hover:border-primary hover:text-[var(--primary)]"
+                >
+                  <ChevronLeft className="h-3 w-3" />
+                </button>
+                <span className="tabular-nums">
+                  {(page + 1).toString().padStart(2, '0')} /{' '}
+                  {totalPages.toString().padStart(2, '0')}
+                </span>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                  disabled={page >= totalPages - 1}
+                  className="border border-border-strong p-1 disabled:opacity-30 hover:border-primary hover:text-[var(--primary)]"
+                >
+                  <ChevronRight className="h-3 w-3" />
+                </button>
+              </div>
+            )}
           </div>
 
           {filteredClips.length === 0 ? (
-            <div className="flex h-64 items-center justify-center rounded-xl border border-dashed border-border bg-muted/20 text-sm text-muted-foreground">
-              No clips match the current filter.
+            <div className="hud-hatch flex h-64 items-center justify-center border border-dashed border-border">
+              <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                // NO CLIPS MATCH
+              </span>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {pagedClips.map((clip) => (
                 <ClipCard
                   key={clip.id}
@@ -470,28 +591,27 @@ export default function JobPage() {
           )}
 
           {totalPages > 1 && (
-            <div className="mt-6 flex items-center justify-center gap-3">
-              <Button
-                variant="outline"
-                size="sm"
+            <div className="mt-6 flex items-center justify-center gap-3 font-mono text-[11px] uppercase tracking-[0.14em]">
+              <button
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
                 disabled={page === 0}
+                className="hud-cta-ghost"
               >
-                <ChevronLeft className="h-4 w-4" />
-                Prev
-              </Button>
-              <span className="text-xs tabular-nums text-muted-foreground">
-                {page + 1} of {totalPages}
+                <ChevronLeft className="h-3 w-3" />
+                PREV
+              </button>
+              <span className="tabular-nums text-muted-foreground">
+                PAGE {(page + 1).toString().padStart(2, '0')} /{' '}
+                {totalPages.toString().padStart(2, '0')}
               </span>
-              <Button
-                variant="outline"
-                size="sm"
+              <button
                 onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
                 disabled={page >= totalPages - 1}
+                className="hud-cta-ghost"
               >
-                Next
-                <ChevronRight className="h-4 w-4" />
-              </Button>
+                NEXT
+                <ChevronRight className="h-3 w-3" />
+              </button>
             </div>
           )}
         </main>
@@ -500,6 +620,17 @@ export default function JobPage() {
       {showExport && job && (
         <ExportModal job={job} onClose={() => setShowExport(false)} />
       )}
+    </div>
+  )
+}
+
+function Key({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <kbd className="border border-border-strong bg-muted px-1.5 py-0.5 text-[10px] tabular-nums">
+        {k}
+      </kbd>
+      <span className="text-muted-foreground">{v}</span>
     </div>
   )
 }

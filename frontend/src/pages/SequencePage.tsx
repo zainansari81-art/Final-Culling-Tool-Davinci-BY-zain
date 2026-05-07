@@ -211,28 +211,48 @@ export default function SequencePage() {
   }
 
   return (
-    <div className="min-h-svh bg-background pb-20">
-      <header className="sticky top-0 z-20 border-b border-border/70 bg-background/85 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-6 py-3">
-          <div className="flex items-center gap-3">
-            <Button asChild variant="ghost" size="icon" className="h-8 w-8">
+    <div className="min-h-svh pb-20">
+      <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur-md">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-5 py-2.5">
+          <div className="flex items-center gap-2">
+            <Button asChild variant="ghost" size="icon" className="h-7 w-7">
               <Link to={`/jobs/${id}`} aria-label="Back to review">
-                <ArrowLeft className="h-4 w-4" />
+                <ArrowLeft className="h-3.5 w-3.5" />
               </Link>
             </Button>
-            <Clapperboard className="h-4 w-4 text-muted-foreground" />
-            <h1 className="text-sm font-medium tracking-tight">Sequence editor</h1>
+            <span className="tick" />
+            <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+              REVIEW
+            </span>
+            <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+              ›
+            </span>
+            <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-foreground">
+              SEQUENCE
+            </span>
+            <Clapperboard className="ml-2 h-3.5 w-3.5 text-[var(--primary)]" />
           </div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            <span><span className="tabular-nums text-foreground">{stats.total}</span> clips</span>
-            <span className="text-muted-foreground/40">·</span>
-            <span><span className="tabular-nums text-success">{stats.aroll}</span> A-roll</span>
-            <span className="text-muted-foreground/40">·</span>
-            <span><span className="tabular-nums">{stats.broll}</span> B-roll</span>
-            <span className="text-muted-foreground/40">·</span>
-            <span><span className="tabular-nums">{stats.words}</span> words</span>
-            <span className="text-muted-foreground/40">·</span>
-            <span><span className="tabular-nums">{stats.avgConf}%</span> avg conf</span>
+          <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em]">
+            <span className="border border-border bg-muted/40 px-2 py-1">
+              <span className="tabular-nums text-foreground">{stats.total}</span>
+              <span className="ml-1 text-muted-foreground">CLIPS</span>
+            </span>
+            <span className="border border-success/40 bg-success/10 px-2 py-1 text-[var(--success)]">
+              <span className="tabular-nums">{stats.aroll}</span>
+              <span className="ml-1 opacity-80">A-ROLL</span>
+            </span>
+            <span className="border border-border bg-muted/40 px-2 py-1">
+              <span className="tabular-nums text-foreground">{stats.broll}</span>
+              <span className="ml-1 text-muted-foreground">B-ROLL</span>
+            </span>
+            <span className="border border-border bg-muted/40 px-2 py-1">
+              <span className="tabular-nums text-foreground">{stats.words}</span>
+              <span className="ml-1 text-muted-foreground">WORDS</span>
+            </span>
+            <span className="border border-primary/40 bg-primary/10 px-2 py-1 text-[var(--primary)]">
+              <span className="tabular-nums">{stats.avgConf}%</span>
+              <span className="ml-1 opacity-80">CONF</span>
+            </span>
           </div>
         </div>
       </header>

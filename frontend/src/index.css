@@ -4,43 +4,47 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* Resolve-plugin charcoal palette with signature amber + teal accents. */
-  --background: #0d0e10;
-  --foreground: #e7e7ea;
-  --card: #16181b;
-  --card-foreground: #e7e7ea;
-  --popover: #1b1d21;
-  --popover-foreground: #e7e7ea;
+  --background: #07080a;
+  --foreground: #e9eaee;
+  --card: #0e1014;
+  --card-foreground: #e9eaee;
+  --popover: #11141a;
+  --popover-foreground: #e9eaee;
   --primary: #ff8a3c;
-  --primary-foreground: #1a1208;
-  --secondary: #1f2228;
-  --secondary-foreground: #e7e7ea;
-  --muted: #181a1e;
-  --muted-foreground: #8b8d94;
-  --accent: #232730;
-  --accent-foreground: #f4f4f6;
+  --primary-foreground: #1a0e04;
+  --secondary: #14171d;
+  --secondary-foreground: #e9eaee;
+  --muted: #0f1217;
+  --muted-foreground: #7d818a;
+  --accent: #1a1e26;
+  --accent-foreground: #f4f5f8;
   --destructive: #ef4d56;
   --destructive-foreground: #ffffff;
-  --border: #25282e;
-  --border-strong: #353941;
-  --input: #1d2026;
+  --border: #1c2027;
+  --border-strong: #2d323c;
+  --input: #14171d;
   --ring: #ff8a3c;
   --success: #2ecc71;
-  --success-foreground: #08130c;
+  --success-foreground: #051d10;
   --warning: #f5a524;
-  --info: #2dd4bf;
-  --rail: #0a0b0d;
-  --panel-header: #1a1c20;
-  --radius: 0.375rem;
+  --info: #4fb6ee;
+  --rail: #050608;
+  --panel: #0c0e12;
+  --panel-header: #11141a;
+  --grid-line: rgba(255, 255, 255, 0.025);
+  --grid-line-strong: rgba(255, 255, 255, 0.05);
+  --hatch: rgba(255, 255, 255, 0.03);
+  --bracket: #4a505c;
+  --bracket-strong: #ff8a3c;
+  --radius: 0.25rem;
 
-  /* Resolve segment color tags (clip-bin coding). */
   --tag-1: #e84e6c;
   --tag-2: #f5a524;
-  --tag-3: #2dd4bf;
-  --tag-4: #4f8ef7;
-  --tag-5: #b362ff;
-  --tag-6: #2ecc71;
-  --tag-7: #ff8a3c;
+  --tag-3: #4fb6ee;
+  --tag-4: #b362ff;
+  --tag-5: #2ecc71;
+  --tag-6: #ff8a3c;
+  --tag-7: #2dd4bf;
   --tag-8: #94a3b8;
 }
 
@@ -70,11 +74,13 @@
   --color-warning: var(--warning);
   --color-info: var(--info);
   --color-rail: var(--rail);
+  --color-panel: var(--panel);
   --color-panel-header: var(--panel-header);
-  --radius-sm: calc(var(--radius) - 2px);
-  --radius-md: var(--radius);
-  --radius-lg: calc(var(--radius) + 2px);
-  --radius-xl: calc(var(--radius) + 4px);
+  --color-bracket: var(--bracket);
+  --radius-sm: calc(var(--radius));
+  --radius-md: calc(var(--radius) + 2px);
+  --radius-lg: calc(var(--radius) + 4px);
+  --radius-xl: calc(var(--radius) + 6px);
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
     Roboto, sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
@@ -86,11 +92,6 @@
   }
   html, body {
     height: 100%;
-    background:
-      radial-gradient(ellipse 80% 50% at 50% -10%,
-        color-mix(in srgb, var(--primary) 6%, transparent) 0%,
-        transparent 60%),
-      var(--background);
     color: var(--foreground);
     color-scheme: dark;
     font-feature-settings: "cv11", "ss01";
@@ -100,6 +101,14 @@
   body {
     font-family: var(--font-sans);
     font-size: 13px;
+    background-color: var(--background);
+    background-image:
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
+      radial-gradient(ellipse 60% 40% at 50% -8%,
+        color-mix(in srgb, var(--primary) 6%, transparent), transparent 70%);
+    background-size: 32px 32px, 32px 32px, 100% 100%;
+    background-attachment: fixed;
   }
   #root {
     min-height: 100svh;
@@ -116,11 +125,14 @@
   }
   ::-webkit-scrollbar-thumb {
     background: var(--border-strong);
-    border: 2px solid var(--background);
+    border: 2px solid transparent;
+    background-clip: padding-box;
     border-radius: 999px;
   }
   ::-webkit-scrollbar-thumb:hover {
     background: color-mix(in srgb, var(--border-strong) 50%, var(--muted-foreground));
+    background-clip: padding-box;
+    border: 2px solid transparent;
   }
   .tabular-nums, kbd, code, .font-mono {
     font-feature-settings: "tnum", "ss01";
@@ -128,32 +140,215 @@
 }
 
 @layer components {
-  /* Plugin panel header bar — Resolve dock chrome. */
-  .panel-bar {
-    background:
-      linear-gradient(180deg,
-        color-mix(in srgb, var(--panel-header) 100%, transparent) 0%,
-        var(--panel-header) 100%);
+  /* HUD bracketed-corner frame. Apply to a relative container. */
+  .hud-frame {
+    position: relative;
+    border: 1px solid var(--border);
+    background: var(--panel);
+  }
+  .hud-frame::before,
+  .hud-frame::after,
+  .hud-frame > .hud-corners::before,
+  .hud-frame > .hud-corners::after {
+    content: "";
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border: 1px solid var(--bracket);
+    pointer-events: none;
+    transition: border-color 0.15s ease;
+  }
+  .hud-frame::before {
+    top: -1px;
+    left: -1px;
+    border-right: none;
+    border-bottom: none;
+  }
+  .hud-frame::after {
+    top: -1px;
+    right: -1px;
+    border-left: none;
+    border-bottom: none;
+  }
+  .hud-frame > .hud-corners {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .hud-frame > .hud-corners::before {
+    bottom: -1px;
+    left: -1px;
+    border-right: none;
+    border-top: none;
+  }
+  .hud-frame > .hud-corners::after {
+    bottom: -1px;
+    right: -1px;
+    border-left: none;
+    border-top: none;
+  }
+  .hud-frame[data-state="active"]::before,
+  .hud-frame[data-state="active"]::after,
+  .hud-frame[data-state="active"] > .hud-corners::before,
+  .hud-frame[data-state="active"] > .hud-corners::after {
+    border-color: var(--primary);
+    width: 14px;
+    height: 14px;
+  }
+  .hud-frame:hover::before,
+  .hud-frame:hover::after,
+  .hud-frame:hover > .hud-corners::before,
+  .hud-frame:hover > .hud-corners::after {
+    border-color: var(--bracket-strong);
+  }
+
+  /* HUD title bar inside a frame */
+  .hud-titlebar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     border-bottom: 1px solid var(--border);
-    box-shadow: inset 0 1px 0 0 color-mix(in srgb, white 4%, transparent);
+    background: linear-gradient(180deg, var(--panel-header), var(--panel));
+    padding: 0.5rem 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
   }
-  .panel-rail {
-    background: var(--rail);
-    border-right: 1px solid var(--border);
+
+  /* `//LABEL` text */
+  .hud-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
   }
+  .hud-label::before {
+    content: "// ";
+    opacity: 0.55;
+  }
+
+  /* Diagonal hatch for empty zones */
+  .hud-hatch {
+    background-image: repeating-linear-gradient(
+      135deg,
+      transparent 0,
+      transparent 6px,
+      var(--hatch) 6px,
+      var(--hatch) 7px
+    );
+  }
+
+  /* Segmented progress (sci-fi chunked bar) */
+  .seg-progress {
+    --seg-count: 24;
+    --seg-fill: 0;
+    display: grid;
+    grid-template-columns: repeat(var(--seg-count), 1fr);
+    gap: 2px;
+    height: 6px;
+  }
+  .seg-progress > i {
+    background: var(--border);
+    border-radius: 1px;
+    transition: background 0.2s ease;
+  }
+  .seg-progress > i.on {
+    background: var(--primary);
+    box-shadow: 0 0 6px -1px color-mix(in srgb, var(--primary) 60%, transparent);
+  }
+  .seg-progress.success > i.on {
+    background: var(--success);
+    box-shadow: 0 0 6px -1px color-mix(in srgb, var(--success) 50%, transparent);
+  }
+
+  /* Tactical scan line on active panels */
+  .scanline {
+    position: relative;
+    overflow: hidden;
+  }
+  .scanline::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      180deg,
+      transparent 0%,
+      color-mix(in srgb, var(--primary) 10%, transparent) 50%,
+      transparent 100%
+    );
+    transform: translateY(-100%);
+    animation: scan 2.6s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes scan {
+    0% { transform: translateY(-100%); }
+    100% { transform: translateY(100%); }
+  }
+
+  /* Marker tick (used as data-anchors / breadcrumb dividers) */
+  .tick {
+    width: 1px;
+    height: 10px;
+    background: var(--border-strong);
+  }
+
+  /* Clip color tag stripe */
   .clip-tag {
     width: 3px;
     flex-shrink: 0;
     align-self: stretch;
-    border-radius: 1px;
   }
-  .scope-strip {
-    height: 3px;
-    border-radius: 1px;
-    background: linear-gradient(90deg,
-      var(--success) 0%,
-      var(--warning) 60%,
-      var(--destructive) 100%);
-    opacity: 0.85;
+
+  /* HUD CTA button — uppercase mono with bracketed inset */
+  .hud-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.9rem;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--primary-foreground);
+    background: var(--primary);
+    border: 1px solid var(--primary);
+    box-shadow:
+      0 0 22px -8px color-mix(in srgb, var(--primary) 80%, transparent),
+      inset 0 1px 0 0 color-mix(in srgb, white 18%, transparent);
+    transition: all 0.15s ease;
+  }
+  .hud-cta:hover:not(:disabled) {
+    filter: brightness(1.08);
+    box-shadow:
+      0 0 28px -6px color-mix(in srgb, var(--primary) 90%, transparent),
+      inset 0 1px 0 0 color-mix(in srgb, white 20%, transparent);
+  }
+  .hud-cta:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    box-shadow: none;
+  }
+  .hud-cta-ghost {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 0.8rem;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--foreground);
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    transition: all 0.15s ease;
+  }
+  .hud-cta-ghost:hover:not(:disabled) {
+    border-color: var(--primary);
+    color: var(--primary);
   }
 }
