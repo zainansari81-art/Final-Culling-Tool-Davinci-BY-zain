@@ -214,6 +214,19 @@ export const api = {
   exportResolve: (jobId: string, projectName: string): Promise<void> =>
     client.post(`/jobs/${jobId}/export/resolve`, { project_name: projectName }).then(() => undefined),
 
+  resolveMediaPool: (): Promise<{
+    project_name: string
+    clips: { path: string; name: string }[]
+  }> => client.get('/resolve/media-pool').then((r) => r.data),
+
+  createJobFromPaths: (
+    paths: string[],
+    sourceName?: string,
+  ): Promise<AnalysisJob> =>
+    client
+      .post('/jobs/from-paths', { paths, source_name: sourceName })
+      .then((r) => toJob(r.data)),
+
   resolvePush: (
     jobId: string,
     opts: { mode?: 'new_timeline' | 'append'; include_near_miss?: boolean; include_rejected?: boolean } = {},

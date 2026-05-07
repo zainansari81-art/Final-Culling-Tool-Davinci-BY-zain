@@ -284,3 +284,67 @@ def push_job(
         "clips_skipped": len(skip),
         "errors": errors,
     }
+
+
+# ─────────────────────────── Media Pool listing ─────────────────────────────
+
+def list_media_pool() -> Dict[str, Any]:
+    """Walk the active project's Media Pool, return every video clip's
+    (path, name). Used by the React UI's New Session modal so the user
+    can pick clips without going through the Tk dialog in CullingTool.py.
+
+    Returns:
+      {"project_name": str, "clips": [{"path": str, "name": str}, ...]}
+    Raises RuntimeError with a user-facing message when Resolve isn't
+    running / no project — caller turns that into HTTP 400.
+    """
+    resolve = _load_resolve()
+    pm = resolve.GetProjectManager()
+    if not pm:
+        raise RuntimeError("Resolve project manager unavailable.")
+    project = pm.GetCurrentProject()
+    if project is None:
+        raise RuntimeError(
+            "No project is open in Resolve. Open or create a project, then retry."
+        )
+    mp = project.GetMediaPool()
+    if mp is None:
+        raise RuntimeError("Active project has no media pool.")
+
+    out: List[Dict[str, str]] = []
+
+    def _walk(folder: Any) -> None:
+        if folder is None:
+            return
+        try:
+            for clip in folder.GetClipList() or []:
+                try:
+                    t = clip.GetClipProperty("Type") or ""
+                    if "Video" not in t and t not in ("Movie", "Sequence"):
+                        continue
+                    p = (
+                        clip.GetClipProperty("File Path")
+                        or clip.GetClipProperty("Filename")
+                    )
+                    if not p:
+                        continue
+                    name = clip.GetName() if hasattr(clip, "GetName") else p.split("/")[-1]
+                    out.append({"path": p, "name": name})
+                except Exception:  # noqa: BLE001
+                    continue
+            for sub in folder.GetSubFolderList() or []:
+                _walk(sub)
+        except Exception:  # noqa: BLE001
+            pass
+
+    _walk(mp.GetRootFolder())
+
+    seen: set = set()
+    deduped: List[Dict[str, str]] = []
+    for c in out:
+        if c["path"] in seen:
+            continue
+        seen.add(c["path"])
+        deduped.append(c)
+
+    return {"project_name": project.GetName(), "clips": deduped}

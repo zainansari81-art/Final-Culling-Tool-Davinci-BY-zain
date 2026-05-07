@@ -845,6 +845,22 @@ def approve_all(job_id: str) -> Dict[str, Any]:
 
 # ─────────────────────────── Resolve plugin bridge ──────────────────────────
 
+
+@app.get(
+    "/resolve/media-pool",
+    summary="List video clips from the active Resolve project's Media Pool",
+)
+def resolve_media_pool() -> Dict[str, Any]:
+    try:
+        import resolve_bridge
+        return resolve_bridge.list_media_pool()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("resolve_media_pool failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Media pool scan failed: {exc}")
+
+
 class ResolvePushBody(BaseModel):
     """POST /jobs/{job_id}/resolve/push payload.
 

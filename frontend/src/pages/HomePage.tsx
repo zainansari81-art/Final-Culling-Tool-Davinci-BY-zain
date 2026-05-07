@@ -57,6 +57,12 @@ export default function HomePage() {
   const enableAi = true
   const [aiInfo, setAiInfo] = useState<AiInfo | null>(null)
   const [newSessionOpen, setNewSessionOpen] = useState(false)
+  const [sourceMode, setSourceMode] = useState<'folder' | 'resolve'>('folder')
+  const [resolveClips, setResolveClips] = useState<{ path: string; name: string }[]>([])
+  const [resolveProject, setResolveProject] = useState<string>('')
+  const [resolvePicked, setResolvePicked] = useState<Set<string>>(new Set())
+  const [resolveLoading, setResolveLoading] = useState(false)
+  const [resolveError, setResolveError] = useState('')
 
   const loadJobs = async () => {
     try {
@@ -105,16 +111,48 @@ export default function HomePage() {
     return () => clearInterval(t)
   }, [activeJob, navigate])
 
+  const loadResolveClips = async () => {
+    setResolveLoading(true)
+    setResolveError('')
+    try {
+      const r = await api.resolveMediaPool()
+      setResolveClips(r.clips)
+      setResolveProject(r.project_name)
+      setResolvePicked(new Set())
+    } catch (err: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const detail = (err as any)?.response?.data?.detail
+      setResolveError(String(detail ?? (err instanceof Error ? err.message : 'Failed to read Media Pool')))
+      setResolveClips([])
+    } finally {
+      setResolveLoading(false)
+    }
+  }
+
   const handleAnalyze = async () => {
-    if (!folderPath || selectedCount === 0) return
     setSubmitting(true)
     setError('')
     try {
-      const job = await api.createJob({
-        folder_path: folderPath,
-        included_files: includedFiles ?? undefined,
-        enable_ai: enableAi,
-      })
+      let job: AnalysisJob
+      if (sourceMode === 'resolve') {
+        const picks = Array.from(resolvePicked)
+        if (picks.length === 0) {
+          setError('Pick at least one clip from the Media Pool.')
+          setSubmitting(false)
+          return
+        }
+        job = await api.createJobFromPaths(picks, resolveProject || 'DaVinci Project')
+      } else {
+        if (!folderPath || selectedCount === 0) {
+          setSubmitting(false)
+          return
+        }
+        job = await api.createJob({
+          folder_path: folderPath,
+          included_files: includedFiles ?? undefined,
+          enable_ai: enableAi,
+        })
+      }
       setActiveJob(job)
       setNewSessionOpen(false)
       navigate(`/jobs/${job.id}`)
@@ -332,20 +370,133 @@ export default function HomePage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <FolderBrowser
-              onSelectionChange={(p, files, count) => {
-                setFolderPath(p)
-                setIncludedFiles(files)
-                setSelectedCount(count)
+          <div className="flex border-b border-border bg-panel-header text-[12px]">
+            <button
+              onClick={() => setSourceMode('folder')}
+              className={cn(
+                'flex-1 px-4 py-2 transition-colors',
+                sourceMode === 'folder'
+                  ? 'border-b-2 border-[var(--primary)] text-foreground'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              Folder
+            </button>
+            <button
+              onClick={() => {
+                setSourceMode('resolve')
+                if (resolveClips.length === 0 && !resolveLoading) loadResolveClips()
               }}
-            />
+              className={cn(
+                'flex-1 px-4 py-2 transition-colors',
+                sourceMode === 'resolve'
+                  ? 'border-b-2 border-[var(--primary)] text-foreground'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              Resolve Media Pool
+            </button>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {sourceMode === 'folder' ? (
+              <FolderBrowser
+                onSelectionChange={(p, files, count) => {
+                  setFolderPath(p)
+                  setIncludedFiles(files)
+                  setSelectedCount(count)
+                }}
+              />
+            ) : (
+              <div className="flex h-full flex-col">
+                <div className="flex items-center justify-between gap-3 border-b border-border bg-panel-header px-4 py-2 text-[12px]">
+                  <div className="truncate text-muted-foreground">
+                    {resolveLoading
+                      ? 'Reading Media Pool…'
+                      : resolveError
+                        ? <span className="text-destructive">{resolveError}</span>
+                        : `${resolveProject || '(no project)'} · ${resolveClips.length} clip${resolveClips.length === 1 ? '' : 's'}`}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setResolvePicked(new Set(resolveClips.map((c) => c.path)))}
+                      disabled={resolveClips.length === 0}
+                      className="cta-ghost h-7 text-[11px]"
+                    >
+                      Select all
+                    </button>
+                    <button
+                      onClick={() => setResolvePicked(new Set())}
+                      disabled={resolvePicked.size === 0}
+                      className="cta-ghost h-7 text-[11px]"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      onClick={loadResolveClips}
+                      disabled={resolveLoading}
+                      className="cta-ghost h-7 text-[11px]"
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                </div>
+                <div className="min-h-0 flex-1 overflow-auto">
+                  {resolveClips.length === 0 && !resolveLoading && !resolveError && (
+                    <div className="p-6 text-center text-[12px] text-muted-foreground">
+                      No video clips in the active project's Media Pool.
+                    </div>
+                  )}
+                  <ul>
+                    {resolveClips.map((c) => {
+                      const checked = resolvePicked.has(c.path)
+                      return (
+                        <li
+                          key={c.path}
+                          className="flex cursor-pointer items-center gap-3 border-b border-border/40 px-4 py-2 hover:bg-accent/40"
+                          onClick={() => {
+                            const next = new Set(resolvePicked)
+                            if (checked) next.delete(c.path)
+                            else next.add(c.path)
+                            setResolvePicked(next)
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {}}
+                            className="h-3.5 w-3.5 accent-[var(--primary)]"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-[12.5px] font-medium">{c.name}</div>
+                            <div className="truncate font-mono text-[10.5px] text-muted-foreground">
+                              {c.path}
+                            </div>
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="border-t border-border bg-card">
             <div className="flex items-center justify-between gap-3 px-4 py-3">
               <div className="text-[12px] text-muted-foreground">
-                {selectedCount > 0 ? (
+                {sourceMode === 'resolve' ? (
+                  resolvePicked.size > 0 ? (
+                    <>
+                      <span className="font-medium tabular-nums text-foreground">
+                        {resolvePicked.size}
+                      </span>{' '}
+                      Media Pool clip{resolvePicked.size === 1 ? '' : 's'} selected · AI on
+                    </>
+                  ) : (
+                    'Pick at least one Media Pool clip to continue.'
+                  )
+                ) : selectedCount > 0 ? (
                   <>
                     <span className="font-medium tabular-nums text-foreground">
                       {selectedCount}
@@ -365,7 +516,12 @@ export default function HomePage() {
                 </button>
                 <button
                   onClick={handleAnalyze}
-                  disabled={selectedCount === 0 || submitting}
+                  disabled={
+                    submitting ||
+                    (sourceMode === 'resolve'
+                      ? resolvePicked.size === 0
+                      : selectedCount === 0)
+                  }
                   className="cta-primary"
                 >
                   {submitting ? (
