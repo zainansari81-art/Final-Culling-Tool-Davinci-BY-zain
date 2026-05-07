@@ -159,6 +159,23 @@ export const api = {
   onboardingDelete: (): Promise<{ removed: boolean }> =>
     client.delete('/onboarding/key').then((r) => r.data),
 
+  onboardingSelect: (provider: 'gemini' | 'vertex'): Promise<{ ok: boolean; provider: string }> =>
+    client.post('/onboarding/select', { provider }).then((r) => r.data),
+
+  onboardingVertexTest: (creds: {
+    project_id: string
+    region: string
+    service_account_json: string
+  }): Promise<OnboardingTestResult> =>
+    client.post('/onboarding/vertex/test', creds).then((r) => r.data),
+
+  onboardingVertexSave: (creds: {
+    project_id: string
+    region: string
+    service_account_json: string
+  }): Promise<{ ok: boolean; provider: string; project_id: string; region: string }> =>
+    client.post('/onboarding/vertex/save', creds).then((r) => r.data),
+
   localStatus: (): Promise<LocalModelStatus> =>
     client.get('/ai/local/status').then((r) => r.data),
 
