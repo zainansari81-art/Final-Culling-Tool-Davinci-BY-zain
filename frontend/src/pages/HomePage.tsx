@@ -4,8 +4,11 @@ import {
   Clock,
   FolderOpen,
   Loader2,
+  PenSquare,
   Play,
   Plus,
+  Search,
+  Settings as SettingsIcon,
   Wand2,
 } from 'lucide-react'
 import { api, type AiInfo } from '../api'
@@ -74,6 +77,17 @@ export default function HomePage() {
   }, [])
 
   useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
+        e.preventDefault()
+        setNewSessionOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  useEffect(() => {
     if (!activeJob) return
     if (activeJob.status === 'done' || activeJob.status === 'failed') return
     const tick = async () => {
@@ -116,7 +130,39 @@ export default function HomePage() {
     }
   }
 
-  const recentJobs = useMemo(() => jobs.slice(0, 8), [jobs])
+  const [sidebarQuery, setSidebarQuery] = useState('')
+
+  const groupedJobs = useMemo(() => {
+    const q = sidebarQuery.trim().toLowerCase()
+    const filtered = jobs.filter((j) =>
+      q
+        ? (j.folder_path.split('/').pop() || j.folder_path)
+            .toLowerCase()
+            .includes(q)
+        : true,
+    )
+    const now = Date.now()
+    const day = 86400_000
+    const todayStart = new Date()
+    todayStart.setHours(0, 0, 0, 0)
+    const yStart = todayStart.getTime() - day
+    const weekStart = todayStart.getTime() - 7 * day
+    const groups: Record<string, AnalysisJob[]> = {
+      Today: [],
+      Yesterday: [],
+      'Previous 7 days': [],
+      Older: [],
+    }
+    for (const j of filtered) {
+      const t = new Date(j.created_at).getTime()
+      if (t >= todayStart.getTime()) groups.Today.push(j)
+      else if (t >= yStart) groups.Yesterday.push(j)
+      else if (t >= weekStart) groups['Previous 7 days'].push(j)
+      else groups.Older.push(j)
+      if (now - t < 0) groups.Today.push(j) // future-safe noop
+    }
+    return groups
+  }, [jobs, sidebarQuery])
 
   if (backendDown) {
     return (
@@ -128,24 +174,75 @@ export default function HomePage() {
     )
   }
 
-  // Sidebar: list of sessions with working indicators (Claude-desktop style)
+  // Sidebar: Claude-desktop style — new-session ghost btn, search, grouped recents, settings link
   const sidebar = (
-    <div className="flex flex-col py-1">
-      {loadingJobs && (
-        <div className="space-y-1.5 px-2 py-1">
-          <Skeleton className="h-7 w-full" />
-          <Skeleton className="h-7 w-full" />
-          <Skeleton className="h-7 w-full" />
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="px-2 pt-2">
+        <button
+          type="button"
+          onClick={() => setNewSessionOpen(true)}
+          className="flex w-full items-center gap-2 rounded-sm border border-border-strong bg-muted/40 px-2.5 py-1.5 text-left text-[12.5px] text-foreground transition-colors hover:border-primary/50 hover:bg-accent"
+        >
+          <PenSquare className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="flex-1">New session</span>
+          <kbd className="font-mono text-[10px] tabular-nums text-muted-foreground">
+            ⌘N
+          </kbd>
+        </button>
+      </div>
+
+      <div className="px-2 pt-2 pb-1">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={sidebarQuery}
+            onChange={(e) => setSidebarQuery(e.target.value)}
+            placeholder="Search sessions"
+            className="h-7 w-full rounded-sm border border-border bg-input pl-7 pr-2 text-[12px] outline-none transition-colors focus:border-primary/60"
+          />
         </div>
-      )}
-      {!loadingJobs && recentJobs.length === 0 && (
-        <p className="px-3 py-3 text-[12px] text-muted-foreground/80">
-          No sessions yet.
-        </p>
-      )}
-      {recentJobs.map((j) => (
-        <SidebarJobItem key={j.id} job={j} />
-      ))}
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto pb-1">
+        {loadingJobs && (
+          <div className="space-y-1.5 px-2 py-2">
+            <Skeleton className="h-7 w-full" />
+            <Skeleton className="h-7 w-full" />
+            <Skeleton className="h-7 w-full" />
+          </div>
+        )}
+        {!loadingJobs && jobs.length === 0 && (
+          <p className="px-3 py-3 text-[11.5px] text-muted-foreground/80">
+            No sessions yet.
+          </p>
+        )}
+        {!loadingJobs &&
+          (Object.entries(groupedJobs) as [string, AnalysisJob[]][]).map(
+            ([label, items]) =>
+              items.length === 0 ? null : (
+                <div key={label} className="mt-2">
+                  <div className="px-3 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
+                    {label}
+                  </div>
+                  <div className="flex flex-col">
+                    {items.map((j) => (
+                      <SidebarJobItem key={j.id} job={j} />
+                    ))}
+                  </div>
+                </div>
+              ),
+          )}
+      </div>
+
+      <div className="border-t border-border">
+        <Link
+          to="/settings"
+          className="flex items-center gap-2 px-3 py-2 text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <SettingsIcon className="h-3.5 w-3.5" />
+          Settings
+        </Link>
+      </div>
     </div>
   )
 
