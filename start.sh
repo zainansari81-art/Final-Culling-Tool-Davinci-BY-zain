@@ -9,6 +9,10 @@ echo ""
 # ── Backend ───────────────────────────────────────────────────────────────
 echo "[1/2] Starting Python backend on http://localhost:8000 ..."
 cd "$SCRIPT_DIR/backend"
+# Cloud (Google AI Studio Gemini) is the default and supported path.
+# Override with AI_BACKEND=local or AI_BACKEND=vertex for dev / power users.
+export AI_BACKEND="${AI_BACKEND:-cloud}"
+echo "      AI backend: $AI_BACKEND"
 "$SCRIPT_DIR/backend/venv/bin/python" -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload &
 BACKEND_PID=$!
 echo "      Backend PID: $BACKEND_PID"

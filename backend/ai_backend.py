@@ -1,9 +1,12 @@
 """AI backend dispatcher.
 
-Selects between Vertex (cloud) and local MLX backends via AI_BACKEND env var.
+Selects backend via AI_BACKEND env var. Cloud (Gemini via Google AI Studio)
+is the default and the only supported path for end users; local and vertex
+remain as power-user / dev fallbacks.
 
-  AI_BACKEND=vertex  (default) → Google Vertex AI: Video Intelligence + Gemini
-  AI_BACKEND=local            → MLX: Qwen2-VL + CLIP + weighted scoring
+  AI_BACKEND=cloud   (default) → Google AI Studio Gemini (free tier)
+  AI_BACKEND=vertex            → Google Vertex AI (requires GCP project)
+  AI_BACKEND=local             → MLX local Qwen + CLIP (Apple Silicon only)
 
 Both backends expose the same three surface functions used by analyzer.py:
   analyze_video(file_path, cleanup) -> Optional[dict]
@@ -19,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("uvicorn.error")
 
-BACKEND = os.getenv("AI_BACKEND", "vertex").lower().strip()
+BACKEND = os.getenv("AI_BACKEND", "cloud").lower().strip()
 
 
 def _log_once():
