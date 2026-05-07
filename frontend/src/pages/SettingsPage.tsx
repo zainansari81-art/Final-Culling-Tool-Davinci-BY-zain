@@ -4,7 +4,6 @@ import {
   Download,
   Info,
   Keyboard,
-  Server,
 } from 'lucide-react'
 import { api, type AiInfo } from '../api'
 import Shell from '../components/Shell'
@@ -75,12 +74,14 @@ function SectionHeader({
   subtitle,
 }: {
   title: string
-  subtitle: string
+  subtitle?: string
 }) {
   return (
-    <div className="mb-6">
-      <h2 className="text-[18px] font-semibold tracking-tight">{title}</h2>
-      <p className="mt-1 text-[12.5px] text-muted-foreground">{subtitle}</p>
+    <div className="mb-3">
+      <h2 className="text-[15px] font-semibold tracking-tight">{title}</h2>
+      {subtitle && (
+        <p className="mt-0.5 text-[12px] text-muted-foreground">{subtitle}</p>
+      )}
     </div>
   )
 }
@@ -95,16 +96,24 @@ function Row({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex items-start justify-between gap-6 border-b border-border py-3 last:border-b-0">
-      <div className="flex-1">
-        <div className="text-[12.5px] font-medium">{label}</div>
+    <div className="flex items-center justify-between gap-6 px-3 py-2">
+      <div className="min-w-0 flex-1">
+        <div className="text-[12.5px] text-foreground">{label}</div>
         {hint && (
-          <div className="mt-0.5 text-[11.5px] text-muted-foreground">
-            {hint}
-          </div>
+          <div className="text-[11px] text-muted-foreground/80">{hint}</div>
         )}
       </div>
-      <div className="text-right text-[12.5px]">{children}</div>
+      <div className="text-right text-[12.5px] text-muted-foreground">
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function GroupHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mt-5 mb-1.5 px-1 text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground/70">
+      {children}
     </div>
   )
 }
@@ -116,11 +125,10 @@ function EngineSection({ aiInfo }: { aiInfo: AiInfo | null }) {
         title="Engine"
         subtitle="Backend that runs analysis. Local stays on this Mac, Cloud uses Vertex Gemini."
       />
-      <div className="panel">
-        <Row
-          label="Status"
-          hint={aiInfo ? 'Backend reachable' : 'Backend offline'}
-        >
+
+      <GroupHeader>Status</GroupHeader>
+      <div className="panel divide-y divide-border">
+        <Row label="Connection" hint={aiInfo ? 'Backend reachable' : 'Backend offline'}>
           <span
             className={cn(
               'inline-flex items-center gap-1.5 rounded-sm px-2 py-0.5 text-[11px] font-medium',
@@ -138,42 +146,33 @@ function EngineSection({ aiInfo }: { aiInfo: AiInfo | null }) {
             {aiInfo ? 'Online' : 'Offline'}
           </span>
         </Row>
-        <div className="px-4">
-          <Row label="Backend" hint="Where analysis runs">
-            <span className="font-medium">
-              {aiInfo?.backend === 'local'
-                ? 'Local'
-                : aiInfo?.backend === 'cloud'
-                  ? 'Cloud'
-                  : '—'}
-            </span>
-          </Row>
-          <Row label="Engine" hint="Model used by AI analysis">
-            <span className="font-medium">{aiInfo?.label ?? '—'}</span>
-          </Row>
-          {aiInfo?.vlm_model && (
-            <Row label="Model id" hint="Underlying VLM identifier">
-              <span className="font-mono text-[11px] text-muted-foreground">
-                {aiInfo.vlm_model}
-              </span>
-            </Row>
-          )}
-        </div>
       </div>
 
-      <div className="panel mt-5">
-        <div className="border-b border-border bg-panel-header px-4 py-2 text-[11.5px] font-medium text-muted-foreground">
-          <Server className="mr-1.5 inline-block h-3 w-3" />
-          Backend
-        </div>
-        <div className="px-4">
-          <Row label="Host">
-            <span className="font-mono text-[11.5px]">127.0.0.1</span>
+      <GroupHeader>Configuration</GroupHeader>
+      <div className="panel divide-y divide-border">
+        <Row label="Backend">
+          <span className="text-foreground">
+            {aiInfo?.backend === 'local'
+              ? 'Local'
+              : aiInfo?.backend === 'cloud'
+                ? 'Cloud'
+                : '—'}
+          </span>
+        </Row>
+        <Row label="Engine">
+          <span className="text-foreground">{aiInfo?.label ?? '—'}</span>
+        </Row>
+        {aiInfo?.vlm_model && (
+          <Row label="Model">
+            <span className="font-mono text-[11.5px]">{aiInfo.vlm_model}</span>
           </Row>
-          <Row label="Build">
-            <span className="font-mono text-[11.5px]">v1.0</span>
-          </Row>
-        </div>
+        )}
+        <Row label="Host">
+          <span className="font-mono text-[11.5px]">127.0.0.1</span>
+        </Row>
+        <Row label="Build">
+          <span className="font-mono text-[11.5px]">v1.0</span>
+        </Row>
       </div>
     </>
   )
@@ -205,26 +204,22 @@ function ShortcutsSection() {
     <>
       <SectionHeader
         title="Shortcuts"
-        subtitle="Keyboard shortcuts available across the app."
+        subtitle="Keyboard shortcuts across the app."
       />
-      <div className="space-y-5">
-        {groups.map((g) => (
-          <div key={g.title} className="panel">
-            <div className="border-b border-border bg-panel-header px-4 py-2 text-[11.5px] font-medium text-muted-foreground">
-              {g.title}
-            </div>
-            <div className="px-4">
-              {g.items.map(([k, v]) => (
-                <Row key={k} label={v}>
-                  <kbd className="rounded-sm border border-border-strong bg-muted px-2 py-0.5 font-mono text-[10.5px] tabular-nums">
-                    {k}
-                  </kbd>
-                </Row>
-              ))}
-            </div>
+      {groups.map((g) => (
+        <div key={g.title}>
+          <GroupHeader>{g.title}</GroupHeader>
+          <div className="panel divide-y divide-border">
+            {g.items.map(([k, v]) => (
+              <Row key={k} label={v}>
+                <kbd className="rounded-sm border border-border-strong bg-muted px-1.5 py-0.5 font-mono text-[10.5px] tabular-nums">
+                  {k}
+                </kbd>
+              </Row>
+            ))}
           </div>
-        ))}
-      </div>
+        </div>
+      ))}
     </>
   )
 }
@@ -234,20 +229,19 @@ function ExportSection() {
     <>
       <SectionHeader
         title="Export"
-        subtitle="Where Cull sends your selects when you finish a review."
+        subtitle="Targets when you finish a review."
       />
-      <div className="panel">
-        <div className="px-4">
-          <Row label="DaVinci Resolve" hint="Connect via Resolve API">
-            <span className="text-[var(--success)]">Connected</span>
-          </Row>
-          <Row label="FCPXML" hint="Export to .fcpxml">
-            <span className="text-muted-foreground">Available</span>
-          </Row>
-          <Row label="CSV" hint="Plain table of selects">
-            <span className="text-muted-foreground">Available</span>
-          </Row>
-        </div>
+      <GroupHeader>Targets</GroupHeader>
+      <div className="panel divide-y divide-border">
+        <Row label="DaVinci Resolve" hint="Connect via Resolve API">
+          <span className="text-[var(--success)]">Connected</span>
+        </Row>
+        <Row label="FCPXML" hint="Export to .fcpxml">
+          Available
+        </Row>
+        <Row label="CSV" hint="Plain table of selects">
+          Available
+        </Row>
       </div>
     </>
   )
@@ -258,17 +252,16 @@ function AboutSection() {
     <>
       <SectionHeader
         title="About"
-        subtitle="Cull for DaVinci Resolve — wedding footage culler."
+        subtitle="Cull for DaVinci Resolve."
       />
-      <div className="panel">
-        <div className="px-4">
-          <Row label="Version">
-            <span className="font-mono text-[11.5px]">1.0.0</span>
-          </Row>
-          <Row label="Branch">
-            <span className="font-mono text-[11.5px]">feature/local-mlx</span>
-          </Row>
-        </div>
+      <GroupHeader>Build</GroupHeader>
+      <div className="panel divide-y divide-border">
+        <Row label="Version">
+          <span className="font-mono text-[11.5px]">1.0.0</span>
+        </Row>
+        <Row label="Branch">
+          <span className="font-mono text-[11.5px]">feature/local-mlx</span>
+        </Row>
       </div>
     </>
   )
