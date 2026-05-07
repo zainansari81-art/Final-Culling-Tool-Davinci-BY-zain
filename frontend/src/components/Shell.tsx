@@ -133,7 +133,7 @@ export default function Shell({
             </>
           )}
           <div className="flex items-center gap-2">
-            <div className="flex h-6 w-6 items-center justify-center rounded-sm bg-primary text-primary-foreground">
+            <div className="flex h-6 w-6 items-center justify-center rounded-sm bg-primary text-white shadow-[0_0_0_1px_color-mix(in_srgb,var(--primary)_60%,black),inset_0_1px_0_color-mix(in_srgb,white_18%,transparent)]">
               <Film className="h-3.5 w-3.5" />
             </div>
             <span className="text-[13px] font-semibold tracking-tight">

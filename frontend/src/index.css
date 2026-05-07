@@ -4,44 +4,45 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* DaVinci Resolve dark grey palette — not pitch black. */
-  --background: #1d1f23;
-  --foreground: #d8dade;
-  --card: #25272b;
-  --card-foreground: #d8dade;
-  --popover: #2a2c30;
-  --popover-foreground: #d8dade;
-  --primary: #ff8a3c;
-  --primary-foreground: #1a0e04;
-  --secondary: #2a2c30;
-  --secondary-foreground: #d8dade;
-  --muted: #25272b;
-  --muted-foreground: #8d8f95;
-  --accent: #2e3036;
-  --accent-foreground: #ebecef;
-  --destructive: #e25862;
+  /* Darker DaVinci-style grey + red accent. */
+  --background: #101113;
+  --foreground: #e6e7ea;
+  --card: #17181b;
+  --card-foreground: #e6e7ea;
+  --popover: #1c1d20;
+  --popover-foreground: #e6e7ea;
+  --primary: #e23b3b;
+  --primary-foreground: #ffffff;
+  --primary-hover: #f04646;
+  --secondary: #1c1d20;
+  --secondary-foreground: #e6e7ea;
+  --muted: #17181b;
+  --muted-foreground: #9a9ca2;
+  --accent: #22232732;
+  --accent-foreground: #f4f5f7;
+  --destructive: #d63444;
   --destructive-foreground: #ffffff;
-  --border: #34373c;
-  --border-strong: #43464d;
-  --input: #2a2c30;
-  --ring: #ff8a3c;
-  --success: #2fb86b;
-  --success-foreground: #051d10;
-  --warning: #e6a230;
-  --info: #4fb6ee;
-  --rail: #181a1d;
-  --panel: #25272b;
-  --panel-header: #2a2c30;
+  --border: #26282c;
+  --border-strong: #383a3f;
+  --input: #1a1b1e;
+  --ring: #e23b3b;
+  --success: #2faa5e;
+  --success-foreground: #04150b;
+  --warning: #d99a30;
+  --info: #4a9fd9;
+  --rail: #0a0b0c;
+  --panel: #17181b;
+  --panel-header: #1c1d20;
   --radius: 0.25rem;
 
-  --tag-1: #e25862;
-  --tag-2: #e6a230;
-  --tag-3: #4fb6ee;
-  --tag-4: #b362ff;
-  --tag-5: #2fb86b;
-  --tag-6: #ff8a3c;
-  --tag-7: #2dd4bf;
-  --tag-8: #94a3b8;
+  --tag-1: #e23b3b;
+  --tag-2: #d99a30;
+  --tag-3: #4a9fd9;
+  --tag-4: #a35ae6;
+  --tag-5: #2faa5e;
+  --tag-6: #e6724a;
+  --tag-7: #2dbab0;
+  --tag-8: #8a8d94;
 }
 
 @theme inline {
@@ -151,12 +152,16 @@
   .smooth-progress > i {
     display: block;
     height: 100%;
-    background: linear-gradient(90deg, var(--primary), color-mix(in srgb, var(--primary) 70%, var(--warning)));
+    background: linear-gradient(90deg,
+      var(--primary),
+      color-mix(in srgb, var(--primary) 60%, var(--warning)));
     border-radius: 999px;
     transition: width 0.4s ease;
   }
   .smooth-progress.success > i {
-    background: linear-gradient(90deg, color-mix(in srgb, var(--success) 80%, transparent), var(--success));
+    background: linear-gradient(90deg,
+      color-mix(in srgb, var(--success) 80%, transparent),
+      var(--success));
   }
 
   .clip-tag {
@@ -165,28 +170,27 @@
     align-self: stretch;
   }
 
+  /* Solid red CTA — high contrast white text. */
   .cta-primary {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 0.45rem;
+    gap: 0.4rem;
     padding: 0.4rem 0.85rem;
     font-size: 12.5px;
-    font-weight: 500;
-    color: var(--primary-foreground);
-    background: linear-gradient(180deg,
-      color-mix(in srgb, var(--primary) 110%, white 4%),
-      var(--primary));
-    border: 1px solid color-mix(in srgb, var(--primary) 70%, black);
+    font-weight: 600;
+    color: #ffffff;
+    background: var(--primary);
+    border: 1px solid color-mix(in srgb, var(--primary) 80%, black);
     border-radius: var(--radius);
-    box-shadow: inset 0 1px 0 0 color-mix(in srgb, white 18%, transparent);
-    transition: filter 0.12s ease;
+    box-shadow: inset 0 1px 0 0 color-mix(in srgb, white 16%, transparent);
+    transition: background 0.12s ease;
   }
   .cta-primary:hover:not(:disabled) {
-    filter: brightness(1.07);
+    background: var(--primary-hover);
   }
   .cta-primary:disabled {
-    opacity: 0.45;
+    opacity: 0.4;
     cursor: not-allowed;
   }
 
@@ -194,9 +198,10 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 0.45rem;
+    gap: 0.4rem;
     padding: 0.35rem 0.75rem;
     font-size: 12.5px;
+    font-weight: 500;
     color: var(--foreground);
     background: var(--muted);
     border: 1px solid var(--border-strong);
@@ -204,8 +209,9 @@
     transition: all 0.12s ease;
   }
   .cta-ghost:hover:not(:disabled) {
-    background: var(--accent);
+    background: color-mix(in srgb, var(--primary) 10%, var(--muted));
     border-color: color-mix(in srgb, var(--primary) 50%, var(--border-strong));
+    color: var(--foreground);
   }
   .cta-ghost:disabled {
     opacity: 0.4;

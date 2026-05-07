@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
-  ArrowRight,
   Clock,
   FolderOpen,
   Loader2,
@@ -15,17 +14,17 @@ import BackendError from '../components/BackendError'
 import FolderBrowser from '../components/FolderBrowser'
 import LocalWarmupCard from '../components/LocalWarmupCard'
 import OnboardingWizard from '../components/OnboardingWizard'
-import LogPane from '../components/LogPane'
 import Shell from '../components/Shell'
 import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import {
-  Sheet,
-  SheetContent,
-  SheetTitle,
-} from '@/components/ui/sheet'
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 
 const formatDate = (iso?: string) => {
@@ -241,59 +240,73 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* New session sheet — slides in from right */}
-      <Sheet open={newSessionOpen} onOpenChange={setNewSessionOpen}>
-        <SheetContent side="right" width="min(640px, 92vw)" className="p-0">
-          <SheetTitle className="sr-only">New session</SheetTitle>
-          <div className="titlebar">
-            <span className="text-foreground">New session</span>
-            <span>Pick folder → run analysis</span>
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="min-h-0 flex-1 overflow-hidden">
-              <FolderBrowser
-                onSelectionChange={(p, files, count) => {
-                  setFolderPath(p)
-                  setIncludedFiles(files)
-                  setSelectedCount(count)
-                }}
-              />
-            </div>
-            <div className="border-t border-border bg-card">
-              <label className="flex cursor-pointer items-start gap-3 border-b border-border px-4 py-3 transition-colors hover:bg-accent/30">
-                <Switch
-                  checked={enableAi}
-                  onCheckedChange={setEnableAi}
-                  disabled={submitting}
-                  className="mt-0.5"
-                />
-                <div className="flex-1">
-                  <div className="flex items-center gap-1.5 text-[12.5px] font-medium">
-                    <Wand2 className="h-3.5 w-3.5 text-[var(--primary)]" />
-                    Use AI analysis
-                  </div>
-                  <p className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground">
-                    {aiInfo?.backend === 'local'
-                      ? 'Runs locally. Adds captions, segments, quality scores.'
-                      : 'Uses Vertex Gemini (~30s/clip). Adds captions, segments, quality, trim suggestions.'}
-                  </p>
-                </div>
-              </label>
+      {/* New session dialog */}
+      <Dialog open={newSessionOpen} onOpenChange={setNewSessionOpen}>
+        <DialogContent
+          className="flex h-[78vh] w-[min(720px,94vw)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[720px]"
+          showCloseButton
+        >
+          <DialogHeader className="border-b border-border bg-panel-header px-4 py-3">
+            <DialogTitle className="text-[14px] font-semibold tracking-tight">
+              New session
+            </DialogTitle>
+            <DialogDescription className="text-[12px]">
+              Pick a folder of clips, optionally enable AI, then run analysis.
+            </DialogDescription>
+          </DialogHeader>
 
-              <div className="flex items-center justify-between gap-3 px-4 py-3">
-                <div className="text-[12px] text-muted-foreground">
-                  {selectedCount > 0 ? (
-                    <>
-                      <span className="font-medium tabular-nums text-foreground">
-                        {selectedCount}
-                      </span>{' '}
-                      clip{selectedCount === 1 ? '' : 's'} selected
-                      {enableAi ? ' · AI on' : ''}
-                    </>
-                  ) : (
-                    'Select at least one clip to continue.'
-                  )}
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <FolderBrowser
+              onSelectionChange={(p, files, count) => {
+                setFolderPath(p)
+                setIncludedFiles(files)
+                setSelectedCount(count)
+              }}
+            />
+          </div>
+
+          <div className="border-t border-border bg-card">
+            <label className="flex cursor-pointer items-start gap-3 border-b border-border px-4 py-3 transition-colors hover:bg-accent/40">
+              <Switch
+                checked={enableAi}
+                onCheckedChange={setEnableAi}
+                disabled={submitting}
+                className="mt-0.5"
+              />
+              <div className="flex-1">
+                <div className="flex items-center gap-1.5 text-[12.5px] font-medium">
+                  <Wand2 className="h-3.5 w-3.5 text-[var(--primary)]" />
+                  Use AI analysis
                 </div>
+                <p className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground">
+                  {aiInfo?.backend === 'local'
+                    ? 'Runs locally. Adds captions, segments, quality scores.'
+                    : 'Uses Vertex Gemini (~30s/clip). Adds captions, segments, quality, trim suggestions.'}
+                </p>
+              </div>
+            </label>
+
+            <div className="flex items-center justify-between gap-3 px-4 py-3">
+              <div className="text-[12px] text-muted-foreground">
+                {selectedCount > 0 ? (
+                  <>
+                    <span className="font-medium tabular-nums text-foreground">
+                      {selectedCount}
+                    </span>{' '}
+                    clip{selectedCount === 1 ? '' : 's'} selected
+                    {enableAi ? ' · AI on' : ''}
+                  </>
+                ) : (
+                  'Select at least one clip to continue.'
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setNewSessionOpen(false)}
+                  className="cta-ghost"
+                >
+                  Cancel
+                </button>
                 <button
                   onClick={handleAnalyze}
                   disabled={selectedCount === 0 || submitting}
@@ -312,55 +325,16 @@ export default function HomePage() {
                   )}
                 </button>
               </div>
-              {error && (
-                <div className="border-t border-destructive/40 bg-destructive/10 px-4 py-2 text-[12px] text-destructive">
-                  {error}
-                </div>
-              )}
             </div>
+            {error && (
+              <div className="border-t border-destructive/40 bg-destructive/10 px-4 py-2 text-[12px] text-destructive">
+                {error}
+              </div>
+            )}
           </div>
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
 
-      {/* If a job is mid-analysis but user is on Library, show a floating ribbon */}
-      {activeJob &&
-        activeJob.status !== 'done' &&
-        activeJob.status !== 'failed' && (
-          <Link
-            to={`/jobs/${activeJob.id}`}
-            className="absolute bottom-3 right-3 z-20 flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 shadow-lg hover:border-primary"
-          >
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--primary)]" />
-            <span className="text-[12px]">
-              Analyzing · {Math.round(activeJob.progress)}%
-            </span>
-            <ArrowRight className="h-3 w-3 text-muted-foreground" />
-          </Link>
-        )}
-
-      {/* Active job analysis logs (full-screen takeover) */}
-      {activeJob &&
-        activeJob.status !== 'done' &&
-        activeJob.status !== 'failed' && (
-          <Sheet open onOpenChange={() => {}}>
-            <SheetContent
-              side="bottom"
-              className="h-[60vh] border-t"
-              showClose={false}
-            >
-              <SheetTitle className="sr-only">Analysis progress</SheetTitle>
-              <div className="titlebar">
-                <span className="text-foreground">
-                  Analyzing · {Math.round(activeJob.progress)}%
-                </span>
-                <span>{activeJob.clips.length} clips processed</span>
-              </div>
-              <div className="min-h-0 flex-1 overflow-auto p-3">
-                <LogPane jobId={activeJob.id} active />
-              </div>
-            </SheetContent>
-          </Sheet>
-        )}
     </Shell>
   )
 }
