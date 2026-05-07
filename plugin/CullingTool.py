@@ -1,8 +1,9 @@
 """CullingTool — DaVinci Resolve Workspace > Scripts > Edit > CullingTool
 
-Single-click launcher: spawns the backend if not running, then opens the
-React UI in the user's default browser. The backend is detached so it
-keeps serving when Resolve quits.
+Single-click launcher: spawns the backend if not running, scans the active
+project's Media Pool for video clips, posts them to /jobs/from-paths, then
+opens the resulting job page in a chrome-less window. Falls back to the
+HomePage when no project / no clips are available.
 
 Install via:
     python3 plugin/install.py
@@ -12,6 +13,7 @@ Stdlib only — runs in Resolve's bundled Python.
 
 from __future__ import annotations
 
+import json
 import os
 import platform
 import subprocess
@@ -20,7 +22,7 @@ import time
 import urllib.request
 import webbrowser
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 BACKEND_HOST = "127.0.0.1"
 BACKEND_PORT = 8000
@@ -174,12 +176,145 @@ def _err_dialog(msg: str) -> None:
             pass
 
 
-# ─────────────────────────── Main ───────────────────────────────────────────
+# ─────────────────────────── Media Pool scan ────────────────────────────────
 
-def main() -> int:
+def _scan_media_pool() -> Tuple[Optional[str], List[str]]:
+    """Returns (project_name, video_clip_paths). project_name=None when
+    Resolve isn't running / no open project — then we degrade to opening
+    the regular UI without auto-creating a job."""
+    try:
+        import DaVinciResolveScript as dvr  # type: ignore
+    except Exception:  # noqa: BLE001
+        return None, []
+    try:
+        resolve = dvr.scriptapp("Resolve")
+    except Exception:  # noqa: BLE001
+        return None, []
+    if not resolve:
+        return None, []
+    pm = resolve.GetProjectManager()
+    if not pm:
+        return None, []
+    project = pm.GetCurrentProject()
+    if not project:
+        return None, []
+    mp = project.GetMediaPool()
+    if not mp:
+        return None, []
+    paths: List[str] = []
+
+    def walk(folder) -> None:
+        if not folder:
+            return
+        clips = folder.GetClipList() or []
+        for c in clips:
+            try:
+                t = c.GetClipProperty("Type") or ""
+                if "Video" not in t and t not in ("Movie", "Sequence"):
+                    continue
+                p = c.GetClipProperty("File Path") or c.GetClipProperty("Filename")
+                if p:
+                    paths.append(p)
+            except Exception:  # noqa: BLE001
+                continue
+        for sub in folder.GetSubFolderList() or []:
+            walk(sub)
+
+    try:
+        walk(mp.GetRootFolder())
+    except Exception:  # noqa: BLE001
+        pass
+
+    seen = set()
+    uniq: List[str] = []
+    for p in paths:
+        if p not in seen:
+            seen.add(p)
+            uniq.append(p)
+    try:
+        name = project.GetName()
+    except Exception:  # noqa: BLE001
+        name = None
+    return name, uniq
+
+
+# ─────────────────────────── HTTP POST helper ───────────────────────────────
+
+def _post_json(path: str, body: dict, timeout: int = 30) -> dict:
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        BACKEND_URL + path,
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+# ─────────────────────────── Chrome --app launcher ──────────────────────────
+
+def _open_app_window(url: str) -> None:
+    """Try Chrome / Chromium / Brave / Edge in --app mode for a chrome-less
+    window. Fall back to the OS default browser."""
+    chrome_candidates_mac = [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        "/Applications/Arc.app/Contents/MacOS/Arc",
+    ]
+    chrome_candidates_win = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+    ]
+    chrome_candidates_linux = [
+        "/usr/bin/google-chrome",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/microsoft-edge",
+        "/usr/bin/brave-browser",
+    ]
+    sysname = platform.system()
+    cands = (
+        chrome_candidates_win if sysname == "Windows"
+        else chrome_candidates_linux if sysname == "Linux"
+        else chrome_candidates_mac
+    )
+    for c in cands:
+        if Path(c).exists():
+            args = [
+                c,
+                f"--app={url}",
+                "--window-size=1340,840",
+                "--disable-features=TranslateUI",
+            ]
+            kwargs = {
+                "stdin": subprocess.DEVNULL,
+                "stdout": subprocess.DEVNULL,
+                "stderr": subprocess.DEVNULL,
+            }
+            if sysname == "Windows":
+                kwargs["creationflags"] = 0x00000008  # DETACHED_PROCESS
+            else:
+                kwargs["start_new_session"] = True
+            try:
+                subprocess.Popen(args, close_fds=True, **kwargs)
+                return
+            except Exception:  # noqa: BLE001
+                continue
+    webbrowser.open(url)
+
+
+# ─────────────────────────── Backend ensure ─────────────────────────────────
+
+def _ensure_backend() -> bool:
+    """Return True when the backend is reachable (already up or successfully
+    spawned). Shows _err_dialog and returns False on hard failures."""
     if _backend_up():
-        webbrowser.open(BACKEND_URL + "/")
-        return 0
+        return True
 
     repo = _find_repo_root()
     if repo is None:
@@ -189,7 +324,7 @@ def main() -> int:
             f"{REPO_HINT_FILE}\n\n"
             "Then re-run Workspace > Scripts > Edit > CullingTool."
         )
-        return 1
+        return False
 
     cmd = _resolve_backend_cmd(repo)
     if cmd is None:
@@ -199,19 +334,18 @@ def main() -> int:
             "installer/culling-backend/culling-backend or the dev launcher\n"
             "installer/run_backend.py. Reinstall the tool."
         )
-        return 1
+        return False
 
     try:
         _spawn_detached(cmd, cwd=repo)
     except Exception as exc:  # noqa: BLE001
         _err_dialog(f"Couldn't spawn the backend:\n\n{type(exc).__name__}: {exc}")
-        return 1
+        return False
 
     deadline = time.monotonic() + SPAWN_WAIT_S
     while time.monotonic() < deadline:
         if _backend_up():
-            webbrowser.open(BACKEND_URL + "/")
-            return 0
+            return True
         time.sleep(0.7)
 
     _err_dialog(
@@ -221,7 +355,37 @@ def main() -> int:
         "credentials in keychain. Run `bash start.sh` once in a terminal to "
         "see the real error."
     )
-    return 1
+    return False
+
+
+# ─────────────────────────── Main ───────────────────────────────────────────
+
+def main() -> int:
+    if not _ensure_backend():
+        return 1
+
+    project_name, paths = _scan_media_pool()
+
+    if not paths:
+        _open_app_window(BACKEND_URL + "/")
+        return 0
+
+    try:
+        body = {"paths": paths, "source_name": project_name or "DaVinci Project"}
+        resp = _post_json("/jobs/from-paths", body)
+        job_id = resp.get("job_id") or resp.get("id")
+        if not job_id:
+            raise RuntimeError(f"backend response missing job_id: {resp!r}")
+        _open_app_window(BACKEND_URL + f"/jobs/{job_id}")
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        _err_dialog(
+            "Couldn't create a job from the active project's Media Pool.\n\n"
+            f"{type(exc).__name__}: {exc}\n\n"
+            "Opening the home page so you can pick a folder manually."
+        )
+        _open_app_window(BACKEND_URL + "/")
+        return 1
 
 
 if __name__ == "__main__":

@@ -479,6 +479,56 @@ def create_job(body: CreateJobRequest) -> AnalysisJob:
     return job
 
 
+# ─────────────────────────── Job — from explicit paths ──────────────────────
+
+class FromPathsBody(BaseModel):
+    """POST /jobs/from-paths payload — used by the Resolve plugin to push the
+    Media Pool's clip list directly without a folder picker."""
+    paths: List[str]
+    source_name: Optional[str] = None  # e.g. Resolve project name for display
+
+
+@app.post(
+    "/jobs/from-paths",
+    response_model=AnalysisJob,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a job from a list of file paths (e.g. Resolve Media Pool scan)",
+)
+def create_job_from_paths(body: FromPathsBody) -> AnalysisJob:
+    valid = [p for p in body.paths if p and Path(p).is_file()]
+    if not valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No valid file paths in payload.",
+        )
+    # Pick the deepest common directory so the existing analyzer flow
+    # (which keys per-job state by folder_path) still works. Falls back to
+    # the parent of the first file when there's no shared prefix.
+    try:
+        common = os.path.commonpath(valid)
+        if not Path(common).is_dir():
+            common = str(Path(valid[0]).parent)
+    except ValueError:
+        common = str(Path(valid[0]).parent)
+
+    job_label = body.source_name or Path(common).name or "Resolve Media Pool"
+    job = AnalysisJob(
+        id=str(uuid.uuid4()),
+        folder_path=common,
+        created_at=datetime.utcnow(),
+    )
+    jobs[job.id] = job
+
+    _executor.submit(
+        _run_job, job.id, common, valid, True,
+    )
+    logger.info(
+        "Created from-paths job %s (%s, %d files) — common=%s",
+        job.id, job_label, len(valid), common,
+    )
+    return job
+
+
 # ─────────────────────────── Filesystem browser ──────────────────────────────
 
 @app.get(
