@@ -28,7 +28,7 @@ import {
   SheetContent,
   SheetTitle,
 } from '@/components/ui/sheet'
-import { api, type AiInfo } from '../api'
+import { api, BASE_URL, type AiInfo } from '../api'
 import { cn } from '@/lib/utils'
 
 type TabKey = 'library' | 'review' | 'sequence' | 'push'
@@ -289,10 +289,35 @@ export default function Shell({
               </span>
             </div>
             <p className="text-[11px] text-muted-foreground">
-              To switch backend or rotate keys, run the onboarding wizard from
-              Sessions or restart the backend with{' '}
-              <code className="rounded bg-muted px-1">AI_BACKEND=cloud</code>.
+              Switching backend or rotating keys reopens the onboarding
+              wizard the next time the Sessions screen loads.
             </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="cta-ghost text-[12px]"
+                onClick={async () => {
+                  if (
+                    !window.confirm(
+                      'Wipe stored cloud credentials? You will be asked to onboard again on the next Sessions screen.',
+                    )
+                  )
+                    return
+                  try {
+                    await fetch(`${BASE_URL}/onboarding/all`, { method: 'DELETE' })
+                  } catch {
+                    /* ignore */
+                  }
+                  setSettingsOpen(false)
+                  navigate('/')
+                  // Force a refresh so HomePage re-fetches /ai/info and the
+                  // wizard renders again.
+                  window.location.reload()
+                }}
+              >
+                Reset / switch backend
+              </button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
