@@ -117,8 +117,10 @@ _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="culling")
 
 # ─────────────────────────── Health check ───────────────────────────────────
 
-@app.get("/", summary="Health check")
+@app.get("/healthz", summary="Health check")
 def health_check() -> Dict[str, str]:
+    # Moved off "/" so the StaticFiles mount at the bottom of this file
+    # can serve the React frontend's index.html when frontend/dist exists.
     return {"status": "ok", "service": "wedding-culling-tool"}
 
 
