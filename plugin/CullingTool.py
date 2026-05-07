@@ -358,6 +358,100 @@ def _ensure_backend() -> bool:
     return False
 
 
+# ─────────────────────────── Tk multi-select picker ─────────────────────────
+
+def _pick_clips_dialog(
+    project_name: Optional[str],
+    paths: List[str],
+) -> Optional[List[str]]:
+    """Tk checklist of Media Pool clips. Returns selected paths,
+    [] when user clicks Analyze with nothing selected, or None on cancel /
+    when tkinter is unavailable (caller decides what to do)."""
+    try:
+        import tkinter as _tk
+        from tkinter import ttk as _ttk
+    except Exception:  # noqa: BLE001
+        return None
+
+    root = _tk.Tk()
+    root.title("CullingTool — pick clips to analyze")
+    root.attributes("-topmost", True)
+    root.geometry("640x520")
+
+    title = project_name or "Resolve Media Pool"
+    _ttk.Label(
+        root,
+        text=f"{title} — {len(paths)} video clip{'s' if len(paths) != 1 else ''} found",
+        font=("Helvetica", 13, "bold"),
+    ).pack(anchor="w", padx=14, pady=(12, 4))
+
+    _ttk.Label(
+        root,
+        text="Tick the clips you want analyzed. Default: none selected.",
+        foreground="#777",
+    ).pack(anchor="w", padx=14, pady=(0, 8))
+
+    # Scrollable checkbutton list.
+    frame = _ttk.Frame(root)
+    frame.pack(fill="both", expand=True, padx=14, pady=4)
+
+    canvas = _tk.Canvas(frame, highlightthickness=0)
+    sb = _ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+    canvas.configure(yscrollcommand=sb.set)
+    sb.pack(side="right", fill="y")
+    canvas.pack(side="left", fill="both", expand=True)
+
+    inner = _ttk.Frame(canvas)
+    inner_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+    def _resize_inner(_evt: object) -> None:
+        canvas.configure(scrollregion=canvas.bbox("all"))
+        canvas.itemconfigure(inner_id, width=canvas.winfo_width())
+
+    inner.bind("<Configure>", _resize_inner)
+
+    vars_: List[Tuple[_tk.IntVar, str]] = []
+    for p in paths:
+        v = _tk.IntVar(value=0)
+        cb = _ttk.Checkbutton(
+            inner,
+            text=Path(p).name,
+            variable=v,
+        )
+        cb.pack(anchor="w", padx=2, pady=1)
+        vars_.append((v, p))
+
+    # Bottom row: select-all / clear / cancel / analyze.
+    bottom = _ttk.Frame(root)
+    bottom.pack(fill="x", side="bottom", padx=14, pady=12)
+
+    chosen: dict = {"paths": None}
+
+    def _select_all() -> None:
+        for v, _ in vars_:
+            v.set(1)
+
+    def _clear_all() -> None:
+        for v, _ in vars_:
+            v.set(0)
+
+    def _on_cancel() -> None:
+        chosen["paths"] = None
+        root.destroy()
+
+    def _on_analyze() -> None:
+        chosen["paths"] = [p for v, p in vars_ if v.get()]
+        root.destroy()
+
+    _ttk.Button(bottom, text="Select all", command=_select_all).pack(side="left")
+    _ttk.Button(bottom, text="Clear", command=_clear_all).pack(side="left", padx=6)
+    _ttk.Button(bottom, text="Cancel", command=_on_cancel).pack(side="right")
+    _ttk.Button(bottom, text="Analyze selected", command=_on_analyze).pack(side="right", padx=6)
+
+    root.mainloop()
+    return chosen["paths"]
+
+
 # ─────────────────────────── Main ───────────────────────────────────────────
 
 def main() -> int:
@@ -367,11 +461,26 @@ def main() -> int:
     project_name, paths = _scan_media_pool()
 
     if not paths:
+        # No clips / no project — let the user pick a folder in the UI.
         _open_app_window(BACKEND_URL + "/")
         return 0
 
+    selection = _pick_clips_dialog(project_name, paths)
+    if selection is None:
+        # tkinter unavailable OR user cancelled. tkinter-missing path
+        # already wrote an error HTML for the user; just open the
+        # HomePage so they aren't stuck.
+        _open_app_window(BACKEND_URL + "/")
+        return 0
+    if not selection:
+        # User clicked Analyze with nothing selected — treat as cancel.
+        return 0
+
     try:
-        body = {"paths": paths, "source_name": project_name or "DaVinci Project"}
+        body = {
+            "paths": selection,
+            "source_name": project_name or "DaVinci Project",
+        }
         resp = _post_json("/jobs/from-paths", body)
         job_id = resp.get("job_id") or resp.get("id")
         if not job_id:
@@ -380,7 +489,7 @@ def main() -> int:
         return 0
     except Exception as exc:  # noqa: BLE001
         _err_dialog(
-            "Couldn't create a job from the active project's Media Pool.\n\n"
+            "Couldn't create a job from the selected Media Pool clips.\n\n"
             f"{type(exc).__name__}: {exc}\n\n"
             "Opening the home page so you can pick a folder manually."
         )
