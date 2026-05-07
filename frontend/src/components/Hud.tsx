@@ -8,20 +8,18 @@ interface HudFrameProps extends DivProps {
   scanline?: boolean
 }
 
+/**
+ * Friendly rounded panel. State adds a soft amber outline + glow when active.
+ * Kept the original `HudFrame` name so call sites stay stable.
+ */
 export function HudFrame({
   state,
-  scanline,
   className,
   children,
   ...rest
 }: HudFrameProps) {
   return (
-    <div
-      data-state={state}
-      className={cn('hud-frame', scanline && 'scanline', className)}
-      {...rest}
-    >
-      <span aria-hidden className="hud-corners" />
+    <div data-state={state} className={cn('panel', className)} {...rest}>
       {children}
     </div>
   )
@@ -33,6 +31,7 @@ interface HudTitleBarProps {
   status?: React.ReactNode
   meta?: React.ReactNode
   className?: string
+  icon?: React.ReactNode
 }
 
 export function HudTitleBar({
@@ -41,32 +40,43 @@ export function HudTitleBar({
   status,
   meta,
   className,
+  icon,
 }: HudTitleBarProps) {
   return (
-    <div className={cn('hud-titlebar', className)}>
-      <div className="flex items-center gap-2">
+    <div className={cn('panel-header', className)}>
+      <div className="flex min-w-0 items-center gap-2">
         {index != null && (
-          <span className="text-foreground/80">
-            {String(index).padStart(2, '0')}
+          <span className="flex h-5 w-5 items-center justify-center rounded-full border border-border-strong bg-muted text-[10px] font-semibold tabular-nums text-muted-foreground">
+            {index}
           </span>
         )}
-        <span className="text-foreground/80">// {label}</span>
+        {icon && <span className="text-muted-foreground">{icon}</span>}
+        <span className="truncate text-[13px] font-medium text-foreground">
+          {label}
+        </span>
         {status && (
-          <span className="ml-2 text-[var(--primary)]">·· {status}</span>
+          <span className="ml-1 text-[11.5px] font-normal text-muted-foreground">
+            · {status}
+          </span>
         )}
       </div>
-      {meta && <div className="text-muted-foreground/80">{meta}</div>}
+      {meta && (
+        <div className="ml-3 truncate text-[11.5px] text-muted-foreground/80">
+          {meta}
+        </div>
+      )}
     </div>
   )
 }
 
-interface HudLabelProps {
+export function HudLabel({
+  children,
+  className,
+}: {
   children: React.ReactNode
   className?: string
-}
-
-export function HudLabel({ children, className }: HudLabelProps) {
-  return <div className={cn('hud-label', className)}>{children}</div>
+}) {
+  return <div className={cn('eyebrow', className)}>{children}</div>
 }
 
 interface HudReadoutProps {
@@ -94,60 +104,51 @@ export function HudReadout({
   return (
     <div
       className={cn(
-        'flex flex-col gap-0.5 font-mono leading-none',
-        align === 'right' && 'items-end',
+        'flex flex-col gap-1',
+        align === 'right' && 'items-end text-right',
       )}
     >
-      <span className="text-[9px] uppercase tracking-[0.18em] text-muted-foreground/80">
-        {label}
-      </span>
-      <span className={cn('text-[13px] tabular-nums', accentClass)}>
+      <span className="text-[11px] text-muted-foreground">{label}</span>
+      <span className={cn('text-[18px] font-semibold tabular-nums leading-none', accentClass)}>
         {value}
       </span>
-      {hint && (
-        <span className="text-[9px] uppercase tracking-[0.16em] text-muted-foreground/60">
-          {hint}
-        </span>
-      )}
+      {hint && <span className="text-[10.5px] text-muted-foreground/70">{hint}</span>}
     </div>
   )
 }
 
 interface SegProgressProps {
-  value: number // 0..100
+  value: number
   segments?: number
   variant?: 'primary' | 'success'
   className?: string
 }
 
+/**
+ * Smooth gradient progress bar. (Name kept for compat with old call sites
+ * that imported `SegProgress` — chunked-segment styling is gone.)
+ */
 export function SegProgress({
   value,
-  segments = 24,
   variant = 'primary',
   className,
 }: SegProgressProps) {
-  const filled = Math.round((Math.max(0, Math.min(100, value)) / 100) * segments)
+  const pct = Math.max(0, Math.min(100, value))
   return (
     <div
-      className={cn('seg-progress', variant === 'success' && 'success', className)}
-      style={{ '--seg-count': segments } as React.CSSProperties}
+      className={cn(
+        'smooth-progress',
+        variant === 'success' && 'success',
+        className,
+      )}
     >
-      {Array.from({ length: segments }).map((_, i) => (
-        <i key={i} className={i < filled ? 'on' : ''} />
-      ))}
+      <i style={{ width: `${pct}%` }} />
     </div>
   )
 }
 
 export function HudDivider({ className }: { className?: string }) {
-  return (
-    <div
-      className={cn(
-        'h-px w-full bg-[linear-gradient(90deg,transparent,var(--border-strong),transparent)]',
-        className,
-      )}
-    />
-  )
+  return <div className={cn('soft-divider', className)} />
 }
 
 interface HudPillProps {
@@ -164,17 +165,17 @@ export function HudPill({
   title,
 }: HudPillProps) {
   const toneClass = {
-    default: 'border-border bg-muted/40 text-foreground',
-    success: 'border-success/40 bg-success/10 text-[var(--success)]',
-    destructive: 'border-destructive/40 bg-destructive/10 text-destructive',
-    primary: 'border-primary/40 bg-primary/10 text-[var(--primary)]',
-    warning: 'border-warning/40 bg-warning/10 text-[var(--warning)]',
+    default: 'border-border bg-muted/50 text-foreground/80',
+    success: 'border-success/40 bg-success/12 text-[var(--success)]',
+    destructive: 'border-destructive/40 bg-destructive/12 text-destructive',
+    primary: 'border-primary/40 bg-primary/12 text-[var(--primary)]',
+    warning: 'border-warning/40 bg-warning/12 text-[var(--warning)]',
   }[tone]
   return (
     <span
       title={title}
       className={cn(
-        'inline-flex items-center gap-1 border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em]',
+        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium leading-none',
         toneClass,
         className,
       )}

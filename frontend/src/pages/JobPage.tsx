@@ -7,7 +7,6 @@ import {
   Download,
   FolderOpen,
   ListOrdered,
-  Search,
   Sparkles,
 } from 'lucide-react'
 import { api } from '../api'
@@ -41,14 +40,14 @@ type FilterTab =
   | 'duplicates'
 
 const FILTER_TABS: { key: FilterTab; label: string }[] = [
-  { key: 'all', label: 'ALL' },
-  { key: 'unreviewed', label: 'UNREVIEWED' },
-  { key: 'approved', label: 'KEEP' },
-  { key: 'near_miss', label: 'NEAR' },
-  { key: 'rejected', label: 'CUT' },
-  { key: 'shaky', label: 'SHAKY' },
-  { key: 'blurry', label: 'BLURRY' },
-  { key: 'duplicates', label: 'DUPS' },
+  { key: 'all', label: 'All' },
+  { key: 'unreviewed', label: 'Unreviewed' },
+  { key: 'approved', label: 'Approved' },
+  { key: 'near_miss', label: 'Near miss' },
+  { key: 'rejected', label: 'Rejected' },
+  { key: 'shaky', label: 'Shaky' },
+  { key: 'blurry', label: 'Blurry' },
+  { key: 'duplicates', label: 'Duplicates' },
 ]
 
 export default function JobPage() {
@@ -233,21 +232,18 @@ export default function JobPage() {
 
   if (loading)
     return (
-      <div className="flex min-h-svh items-center justify-center font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-        // LOADING SESSION ···
+      <div className="flex min-h-svh items-center justify-center text-[13px] text-muted-foreground">
+        Loading job…
       </div>
     )
 
   if (notFound || !job)
     return (
       <div className="flex min-h-svh flex-col items-center justify-center gap-3 px-6 text-center">
-        <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-destructive">
-          // ERROR · 404 SESSION
-        </div>
         <h2 className="text-base font-semibold tracking-tight">Job not found</h2>
-        <p className="max-w-sm text-[12px] text-muted-foreground">
-          This job is no longer in memory. Backend was likely restarted —
-          jobs aren't persisted to disk yet.
+        <p className="max-w-sm text-[13px] text-muted-foreground">
+          This job is no longer in memory. The backend was likely restarted —
+          jobs aren't persisted to disk yet. Start a new analysis from home.
         </p>
         <Button asChild>
           <Link to="/">Go home</Link>
@@ -271,134 +267,98 @@ export default function JobPage() {
     const sec = Math.max(0, (end - start) / 1000)
     const m = Math.floor(sec / 60)
     const s = sec - m * 60
-    return m > 0 ? `${m}m${s.toFixed(0)}s` : `${s.toFixed(1)}s`
+    return m > 0 ? `${m}m ${s.toFixed(0)}s` : `${s.toFixed(1)}s`
   })()
 
   return (
     <div className="min-h-svh">
-      {/* TOP BAR — breadcrumb + search + actions */}
+      {/* TOP BAR — calm */}
       <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur-md">
-        <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-4 px-5 py-2.5">
-          <div className="flex min-w-0 items-center gap-2">
-            <Button asChild variant="ghost" size="icon" className="h-7 w-7">
+        <div className="mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-3 px-5 py-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <Button asChild variant="ghost" size="icon" className="h-8 w-8">
               <Link to="/" aria-label="Back to home">
-                <ArrowLeft className="h-3.5 w-3.5" />
+                <ArrowLeft className="h-4 w-4" />
               </Link>
             </Button>
-            <span className="tick" />
-            <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-              SESSIONS
-            </span>
-            <ChevronRight className="h-3 w-3 text-muted-foreground" />
-            <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-              REVIEW
-            </span>
-            <ChevronRight className="h-3 w-3 text-muted-foreground" />
             <div
-              className="flex min-w-0 items-center gap-1.5 border border-border bg-muted/30 px-2 py-1"
+              className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5"
               title={job.folder_path}
             >
-              <FolderOpen className="h-3 w-3 shrink-0 text-[var(--primary)]" />
-              <span className="truncate font-mono text-[11px] font-medium">
+              <FolderOpen className="h-3.5 w-3.5 shrink-0 text-[var(--primary)]" />
+              <span className="truncate text-[13px] font-medium">
                 {folderName}
               </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="hidden items-center gap-2 border border-border bg-muted/40 px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground md:inline-flex"
-            >
-              <Search className="h-3 w-3" />
-              <span>FIND CLIP</span>
-              <kbd className="ml-2 border border-border-strong px-1 py-px text-[9px]">
-                ⌘F
-              </kbd>
-            </button>
-
-            <Button asChild variant="outline" size="sm" className="h-7 gap-1.5 font-mono text-[11px] uppercase tracking-[0.14em]">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button asChild variant="outline" size="sm" className="gap-1.5">
               <Link to={`/jobs/${id}/sequence`}>
-                <ListOrdered className="h-3 w-3" />
-                SEQUENCE
+                <ListOrdered className="h-3.5 w-3.5" />
+                Sequence
               </Link>
             </Button>
 
             {approveAllState === 'done' ? (
-              <HudPill tone="success">✓ DONE</HudPill>
+              <HudPill tone="success">✓ Done</HudPill>
             ) : (
               <button
                 type="button"
                 onClick={handleApproveAll}
                 disabled={approveAllState === 'loading'}
-                className="hud-cta-ghost"
+                className="cta-ghost"
               >
-                <Sparkles className="h-3 w-3" />
-                {approveAllState === 'loading' ? 'RUNNING…' : 'AUTO-KEEP'}
+                <Sparkles className="h-3.5 w-3.5" />
+                {approveAllState === 'loading' ? 'Running…' : 'Auto-approve'}
               </button>
             )}
 
-            <button
-              className="hud-cta"
-              onClick={() => setShowExport(true)}
-            >
-              <Download className="h-3.5 w-3.5" />
-              EXPORT TO RESOLVE
+            <button className="cta-primary" onClick={() => setShowExport(true)}>
+              <Download className="h-4 w-4" />
+              Export to Resolve
             </button>
           </div>
         </div>
 
-        {/* sub-readout strip */}
-        <div className="mx-auto flex max-w-[1500px] items-center gap-6 border-t border-border/60 px-5 py-2">
+        {/* sub-bar: stats + review progress */}
+        <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-x-8 gap-y-3 border-t border-border/60 px-5 py-3">
+          <HudReadout label="Total" value={stats.total} />
           <HudReadout
-            label="Total"
-            value={stats.total.toString().padStart(3, '0')}
-            hint="CLIPS"
-          />
-          <HudReadout
-            label="Keep"
-            value={stats.approved.toString().padStart(3, '0')}
-            hint="APPROVED"
+            label="Approved"
+            value={stats.approved}
             accent="success"
           />
           <HudReadout
-            label="Cut"
-            value={stats.rejected.toString().padStart(3, '0')}
-            hint="REJECTED"
+            label="Rejected"
+            value={stats.rejected}
             accent="destructive"
           />
           <HudReadout
             label="Pending"
-            value={stats.unreviewed.toString().padStart(3, '0')}
-            hint="UNREVIEWED"
+            value={stats.unreviewed}
             accent="warning"
           />
-          {elapsed && (
-            <HudReadout
-              label="Run-time"
-              value={elapsed}
-              hint="ANALYSIS"
-            />
-          )}
-          <div className="ml-auto flex flex-1 items-center gap-3">
-            <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-              REVIEW PROGRESS
+          {elapsed && <HudReadout label="Run time" value={elapsed} />}
+          <div className="flex flex-1 min-w-[220px] items-center gap-3">
+            <span className="text-[11.5px] text-muted-foreground">
+              Review progress
             </span>
-            <SegProgress value={reviewedPct} segments={48} className="flex-1" />
-            <span className="font-mono text-[11px] tabular-nums text-foreground">
+            <SegProgress value={reviewedPct} className="flex-1" />
+            <span className="text-[12px] tabular-nums font-medium">
               {Math.round(reviewedPct)}%
             </span>
           </div>
         </div>
       </header>
 
-      <div className="mx-auto flex max-w-[1500px] gap-4 px-5 py-5">
-        {/* LEFT RAIL: filters + segments */}
-        <aside className="hidden w-64 shrink-0 flex-col gap-4 lg:flex">
-          {/* Filter list */}
+      <div className="mx-auto flex max-w-[1500px] gap-5 px-5 py-6">
+        {/* LEFT RAIL */}
+        <aside className="hidden w-60 shrink-0 flex-col gap-4 lg:flex">
+          {/* filter list */}
           <HudFrame>
-            <HudTitleBar label="FILTER" />
-            <div className="flex flex-col">
+            <HudTitleBar label="Filter" />
+            <div className="flex flex-col py-1">
               {FILTER_TABS.map((tab) => {
                 const active = activeFilter === tab.key
                 const count = tabCounts[tab.key]
@@ -410,17 +370,19 @@ export default function JobPage() {
                       setPage(0)
                     }}
                     className={cn(
-                      'group flex items-center justify-between border-l-2 px-3 py-2 text-left font-mono text-[11px] uppercase tracking-[0.14em] transition-colors',
+                      'mx-1 flex items-center justify-between rounded-md px-2.5 py-1.5 text-left text-[12.5px] transition-colors',
                       active
-                        ? 'border-l-[var(--primary)] bg-primary/10 text-foreground'
-                        : 'border-l-transparent text-muted-foreground hover:bg-accent/30 hover:text-foreground',
+                        ? 'bg-primary/10 text-foreground'
+                        : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
                     )}
                   >
                     <span>{tab.label}</span>
                     <span
                       className={cn(
-                        'tabular-nums',
-                        active ? 'text-[var(--primary)]' : 'text-muted-foreground/70',
+                        'tabular-nums text-[11.5px]',
+                        active
+                          ? 'text-[var(--primary)]'
+                          : 'text-muted-foreground/70',
                       )}
                     >
                       {count}
@@ -431,13 +393,17 @@ export default function JobPage() {
             </div>
           </HudFrame>
 
-          {/* Segments */}
+          {/* segments */}
           <HudFrame>
             <HudTitleBar
-              label="SEGMENTS"
-              meta={`${presentSegments.length} ACTIVE`}
+              label="Segments"
+              meta={
+                presentSegments.length > 0
+                  ? `${presentSegments.length} present`
+                  : undefined
+              }
             />
-            <div className="flex flex-col">
+            <div className="flex flex-col py-1">
               {presentSegments.map((seg) => {
                 const checked = activeSegments.has(seg)
                 const segIdx = SEGMENTS.indexOf(seg)
@@ -447,31 +413,26 @@ export default function JobPage() {
                     key={seg}
                     onClick={() => toggleSegment(seg)}
                     className={cn(
-                      'group flex items-center gap-2 border-l-2 px-3 py-2 text-left font-mono text-[11px] transition-colors',
+                      'mx-1 flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12.5px] transition-colors',
                       checked
                         ? 'bg-accent/40 text-foreground'
-                        : 'border-l-transparent text-muted-foreground hover:bg-accent/20 hover:text-foreground',
+                        : 'text-muted-foreground hover:bg-accent/30 hover:text-foreground',
                     )}
-                    style={{
-                      borderLeftColor: checked ? segColor : 'transparent',
-                    }}
                   >
                     <span
-                      className="h-2 w-2 shrink-0"
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
                       style={{ background: segColor }}
                     />
-                    <span className="flex-1 truncate uppercase tracking-[0.06em]">
-                      {seg}
-                    </span>
-                    <span className="tabular-nums text-muted-foreground/70">
+                    <span className="flex-1 truncate">{seg}</span>
+                    <span className="tabular-nums text-[11px] text-muted-foreground/70">
                       {segmentCounts[seg] ?? 0}
                     </span>
                   </button>
                 )
               })}
               {presentSegments.length === 0 && (
-                <div className="hud-hatch px-3 py-6 text-center font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                  NO SEGMENTS
+                <div className="px-3 py-6 text-center text-[12px] text-muted-foreground">
+                  No segments yet.
                 </div>
               )}
               {activeSegments.size > 0 && (
@@ -480,29 +441,29 @@ export default function JobPage() {
                     setActiveSegments(new Set())
                     setPage(0)
                   }}
-                  className="border-t border-border px-3 py-2 text-left font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--primary)] hover:bg-primary/5"
+                  className="mx-1 mt-1 rounded-md px-2.5 py-1.5 text-left text-[12px] text-muted-foreground hover:bg-accent/30 hover:text-foreground"
                 >
-                  × CLEAR FILTER
+                  Clear filter
                 </button>
               )}
             </div>
           </HudFrame>
 
-          {/* Hotkeys reference */}
+          {/* hotkeys reference */}
           <HudFrame>
-            <HudTitleBar label="HOTKEYS" />
-            <div className="grid grid-cols-2 gap-2 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em]">
-              <Key k="A" v="KEEP" />
-              <Key k="R" v="CUT" />
-              <Key k="N" v="NEAR" />
-              <Key k="1-9" v="SEGMENT" />
-              <Key k="←/→" v="NAVIGATE" />
-              <Key k="⌘F" v="FIND" />
+            <HudTitleBar label="Shortcuts" />
+            <div className="grid grid-cols-2 gap-2 px-3 py-3 text-[11.5px]">
+              <Key k="A" v="Approve" />
+              <Key k="R" v="Reject" />
+              <Key k="N" v="Near miss" />
+              <Key k="1–9" v="Segment" />
+              <Key k="←/→" v="Navigate" />
+              <Key k="Space" v="Preview" />
             </div>
           </HudFrame>
         </aside>
 
-        {/* MAIN: clip grid */}
+        {/* MAIN */}
         <main className="min-w-0 flex-1">
           {/* mobile filter strip */}
           <ScrollArea className="mb-3 lg:hidden">
@@ -515,7 +476,7 @@ export default function JobPage() {
                     setPage(0)
                   }}
                   className={cn(
-                    'flex shrink-0 items-center gap-1.5 border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.14em]',
+                    'flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-[12px]',
                     activeFilter === tab.key
                       ? 'border-primary bg-primary/15 text-[var(--primary)]'
                       : 'border-border text-muted-foreground',
@@ -531,52 +492,50 @@ export default function JobPage() {
           </ScrollArea>
 
           {/* result count + paginator */}
-          <div className="mb-3 flex items-center justify-between">
-            <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-3 text-[12px] text-muted-foreground">
               <span>
-                <span className="tabular-nums text-foreground">
-                  {filteredClips.length.toString().padStart(3, '0')}
-                </span>
-                {' '}MATCHES
+                <span className="tabular-nums font-medium text-foreground">
+                  {filteredClips.length}
+                </span>{' '}
+                clip{filteredClips.length === 1 ? '' : 's'}
               </span>
               {activeSegments.size > 0 && (
                 <span className="text-[var(--primary)]">
-                  · {activeSegments.size} SEG FILTER
+                  · {activeSegments.size} segment
+                  {activeSegments.size === 1 ? '' : 's'}
                 </span>
               )}
             </div>
             {totalPages > 1 && (
-              <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+              <div className="flex items-center gap-2 text-[12px]">
                 <button
                   onClick={() => setPage((p) => Math.max(0, p - 1))}
                   disabled={page === 0}
-                  className="border border-border-strong p-1 disabled:opacity-30 hover:border-primary hover:text-[var(--primary)]"
+                  className="rounded-md border border-border-strong p-1 text-muted-foreground transition-colors hover:border-primary hover:text-[var(--primary)] disabled:opacity-30"
                 >
-                  <ChevronLeft className="h-3 w-3" />
+                  <ChevronLeft className="h-3.5 w-3.5" />
                 </button>
-                <span className="tabular-nums">
-                  {(page + 1).toString().padStart(2, '0')} /{' '}
-                  {totalPages.toString().padStart(2, '0')}
+                <span className="tabular-nums text-muted-foreground">
+                  Page {page + 1} of {totalPages}
                 </span>
                 <button
                   onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
                   disabled={page >= totalPages - 1}
-                  className="border border-border-strong p-1 disabled:opacity-30 hover:border-primary hover:text-[var(--primary)]"
+                  className="rounded-md border border-border-strong p-1 text-muted-foreground transition-colors hover:border-primary hover:text-[var(--primary)] disabled:opacity-30"
                 >
-                  <ChevronRight className="h-3 w-3" />
+                  <ChevronRight className="h-3.5 w-3.5" />
                 </button>
               </div>
             )}
           </div>
 
           {filteredClips.length === 0 ? (
-            <div className="hud-hatch flex h-64 items-center justify-center border border-dashed border-border">
-              <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                // NO CLIPS MATCH
-              </span>
+            <div className="flex h-64 items-center justify-center rounded-xl border border-dashed border-border bg-muted/15 text-[13px] text-muted-foreground">
+              No clips match the current filter.
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {pagedClips.map((clip) => (
                 <ClipCard
                   key={clip.id}
@@ -591,26 +550,25 @@ export default function JobPage() {
           )}
 
           {totalPages > 1 && (
-            <div className="mt-6 flex items-center justify-center gap-3 font-mono text-[11px] uppercase tracking-[0.14em]">
+            <div className="mt-6 flex items-center justify-center gap-3 text-[12px]">
               <button
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
                 disabled={page === 0}
-                className="hud-cta-ghost"
+                className="cta-ghost"
               >
-                <ChevronLeft className="h-3 w-3" />
-                PREV
+                <ChevronLeft className="h-3.5 w-3.5" />
+                Prev
               </button>
               <span className="tabular-nums text-muted-foreground">
-                PAGE {(page + 1).toString().padStart(2, '0')} /{' '}
-                {totalPages.toString().padStart(2, '0')}
+                Page {page + 1} of {totalPages}
               </span>
               <button
                 onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
                 disabled={page >= totalPages - 1}
-                className="hud-cta-ghost"
+                className="cta-ghost"
               >
-                NEXT
-                <ChevronRight className="h-3 w-3" />
+                Next
+                <ChevronRight className="h-3.5 w-3.5" />
               </button>
             </div>
           )}
@@ -627,7 +585,7 @@ export default function JobPage() {
 function Key({ k, v }: { k: string; v: string }) {
   return (
     <div className="flex items-center gap-2">
-      <kbd className="border border-border-strong bg-muted px-1.5 py-0.5 text-[10px] tabular-nums">
+      <kbd className="rounded border border-border-strong bg-muted px-1.5 py-0.5 font-mono text-[10.5px] tabular-nums">
         {k}
       </kbd>
       <span className="text-muted-foreground">{v}</span>

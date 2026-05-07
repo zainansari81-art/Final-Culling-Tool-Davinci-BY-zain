@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, FolderOpen, Loader2 } from 'lucide-react'
+import { ArrowLeft, Check, FolderOpen, Loader2 } from 'lucide-react'
 import { api } from '../api'
 import type { AnalysisJob } from '../types'
 import LogPane from '../components/LogPane'
@@ -52,36 +52,39 @@ export default function ProgressPage({ job, onJobUpdate }: Props) {
     if (dt > 0.5 && dpct > 0) {
       const remainingPct = 100 - progress
       const seconds = Math.round((remainingPct / dpct) * dt)
-      if (seconds < 60) setEta(`${seconds}s`)
-      else setEta(`${Math.round(seconds / 60)}m`)
+      if (seconds < 60) setEta(`~${seconds}s`)
+      else setEta(`~${Math.round(seconds / 60)}m`)
       lastTickRef.current = { ts: now, pct: progress }
     }
   }, [progress])
 
   const statusText =
     job.status === 'queued'
-      ? 'QUEUED · WAITING TO START'
+      ? 'Queued — waiting to start'
       : clipsFound > 0
-        ? `PROCESSED ${clipsFound} CLIP${clipsFound === 1 ? '' : 'S'}`
-        : 'SCANNING FOR VIDEO FILES…'
+        ? `Processed ${clipsFound} clip${clipsFound === 1 ? '' : 's'}`
+        : 'Scanning for video files…'
 
   const folderName = job.folder_path.split('/').filter(Boolean).pop() ?? job.id
 
-  type Phase = { idx: number; label: string; state: 'pending' | 'active' | 'done' }
+  type Phase = { idx: number; label: string; sub: string; state: 'pending' | 'active' | 'done' }
   const phases: Phase[] = [
     {
       idx: 1,
-      label: 'SCAN · DISCOVER FILES',
+      label: 'Scan folder',
+      sub: 'Finding video files',
       state: progress > 5 || clipsFound > 0 ? 'done' : 'active',
     },
     {
       idx: 2,
-      label: 'ANALYZE · SHAKE / BLUR / EXPOSURE',
+      label: 'Score clips',
+      sub: 'Shake, blur, exposure',
       state: progress >= 95 ? 'done' : progress > 5 ? 'active' : 'pending',
     },
     {
       idx: 3,
-      label: 'DETECT · DUPLICATE GROUPING',
+      label: 'Group duplicates',
+      sub: 'Perceptual hashing',
       state: job.status === 'done' ? 'done' : progress >= 95 ? 'active' : 'pending',
     },
   ]
@@ -89,73 +92,69 @@ export default function ProgressPage({ job, onJobUpdate }: Props) {
   return (
     <div className="min-h-svh">
       <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur-md">
-        <div className="mx-auto flex max-w-4xl items-center gap-3 px-5 py-2.5">
-          <Button asChild variant="ghost" size="icon" className="h-7 w-7">
+        <div className="mx-auto flex max-w-4xl items-center gap-3 px-5 py-3">
+          <Button asChild variant="ghost" size="icon" className="h-8 w-8">
             <Link to="/" aria-label="Back to home">
-              <ArrowLeft className="h-3.5 w-3.5" />
+              <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
-          <span className="tick" />
-          <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-            ANALYSIS · LIVE
-          </span>
           <div
-            className="ml-1 flex min-w-0 items-center gap-1.5 border border-border bg-muted/30 px-2 py-1"
+            className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5"
             title={job.folder_path}
           >
-            <FolderOpen className="h-3 w-3 shrink-0 text-[var(--primary)]" />
-            <span className="truncate font-mono text-[11px] font-medium">
-              {folderName}
-            </span>
+            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-[var(--primary)]" />
+            <span className="truncate text-[13px] font-medium">{folderName}</span>
           </div>
+          <span className="text-[12.5px] text-muted-foreground">
+            Analyzing…
+          </span>
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl px-5 py-6">
-        <div className="mb-5">
-          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--primary)]">
-            // ANALYSIS · IN PROGRESS
-          </div>
-          <h1 className="mt-2 text-[24px] font-semibold tracking-tight">
-            Scoring keyframes &amp; finding duplicates
+      <main className="mx-auto max-w-4xl px-5 py-8">
+        <div className="mb-6">
+          <h1 className="text-[22px] font-semibold tracking-tight">
+            Analyzing your footage
           </h1>
+          <p className="mt-1.5 text-[13px] text-muted-foreground">
+            Extracting keyframes, scoring quality, and detecting duplicates.
+            You can leave this open — it'll move to review when done.
+          </p>
         </div>
 
-        {/* Main progress frame */}
-        <HudFrame state="active" scanline>
+        <HudFrame state="active">
           <HudTitleBar
-            label="JOB · ACTIVE TELEMETRY"
-            status={`${progress}%`}
-            meta={`ID ${job.id.slice(0, 8).toUpperCase()}`}
+            label="Progress"
+            status={
+              job.status === 'queued'
+                ? 'Queued'
+                : `${progress}% complete`
+            }
           />
-          <div className="space-y-4 px-4 py-4">
-            <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.14em]">
-              <Loader2 className="h-3 w-3 animate-spin text-[var(--primary)]" />
-              <span className="text-foreground/80">{statusText}</span>
+          <div className="space-y-5 px-5 py-5">
+            <div className="flex items-center gap-2 text-[13px]">
+              <Loader2 className="h-4 w-4 animate-spin text-[var(--primary)]" />
+              <span className="font-medium">{statusText}</span>
             </div>
-            <SegProgress value={progress} segments={48} />
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            <SegProgress value={progress} />
+            <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
               <HudReadout
-                label="Progress"
-                value={`${progress}%`}
-                hint="OF TOTAL"
-                accent="primary"
-              />
-              <HudReadout
-                label="Clips"
-                value={(clipsFound || 0).toString().padStart(3, '0')}
-                hint="DISCOVERED"
+                label="Clips found"
+                value={clipsFound || '—'}
               />
               <HudReadout
                 label="ETA"
                 value={progress > 0 && progress < 100 ? eta : '—'}
-                hint="REMAINING"
                 accent={progress > 0 && progress < 100 ? 'warning' : 'default'}
               />
               <HudReadout
-                label="State"
-                value={job.status === 'queued' ? 'QUEUED' : 'RUNNING'}
-                hint="JOB"
+                label="Status"
+                value={job.status === 'queued' ? 'Queued' : 'Running'}
+                accent="primary"
+              />
+              <HudReadout
+                label="Done"
+                value={`${progress}%`}
                 accent="success"
                 align="right"
               />
@@ -164,46 +163,59 @@ export default function ProgressPage({ job, onJobUpdate }: Props) {
         </HudFrame>
 
         {job.status === 'failed' && (
-          <div className="mt-4 border border-destructive/40 bg-destructive/10 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-destructive">
-            ERR · ANALYSIS FAILED
-            {job.error ? ` · ${job.error}` : ' · CHECK BACKEND LOGS.'}
+          <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[13px] text-destructive">
+            Analysis failed.
+            {job.error ? ` ${job.error}` : ' Check backend logs.'}
           </div>
         )}
 
-        {/* Phase rail */}
-        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
           {phases.map((p) => (
             <HudFrame key={p.idx} state={p.state}>
-              <div className="flex items-center justify-between border-b border-border bg-panel-header px-3 py-2 font-mono text-[10px] uppercase tracking-[0.14em]">
-                <span className="text-muted-foreground/80">
-                  // PHASE {p.idx.toString().padStart(2, '0')}
-                </span>
+              <div className="flex items-center justify-between border-b border-border bg-panel-header px-3.5 py-2">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                      'flex h-5 w-5 items-center justify-center rounded-full text-[10.5px] font-semibold tabular-nums',
+                      p.state === 'done'
+                        ? 'bg-success text-success-foreground'
+                        : p.state === 'active'
+                          ? 'border border-primary bg-primary/15 text-[var(--primary)]'
+                          : 'border border-border-strong bg-muted text-muted-foreground',
+                    )}
+                  >
+                    {p.state === 'done' ? <Check className="h-3 w-3" /> : p.idx}
+                  </span>
+                  <span className="text-[13px] font-medium">{p.label}</span>
+                </div>
                 <span
                   className={cn(
-                    'tabular-nums',
+                    'text-[11px]',
                     p.state === 'done' && 'text-[var(--success)]',
                     p.state === 'active' && 'text-[var(--primary)]',
                     p.state === 'pending' && 'text-muted-foreground/60',
                   )}
                 >
-                  {p.state === 'done' ? '✓ DONE' : p.state === 'active' ? '▶ RUN' : '· IDLE'}
+                  {p.state === 'done'
+                    ? 'Done'
+                    : p.state === 'active'
+                      ? 'Running'
+                      : 'Waiting'}
                 </span>
               </div>
-              <div className="px-3 py-3 font-mono text-[11px] uppercase tracking-[0.06em] text-foreground">
-                {p.label}
+              <div className="px-3.5 py-3">
+                <p className="text-[12px] text-muted-foreground">{p.sub}</p>
+                <SegProgress
+                  value={p.state === 'done' ? 100 : p.state === 'active' ? 50 : 0}
+                  variant={p.state === 'done' ? 'success' : 'primary'}
+                  className="mt-2.5"
+                />
               </div>
-              <SegProgress
-                value={p.state === 'done' ? 100 : p.state === 'active' ? 50 : 0}
-                segments={20}
-                variant={p.state === 'done' ? 'success' : 'primary'}
-                className="mx-3 mb-3"
-              />
             </HudFrame>
           ))}
         </div>
 
-        {/* LIVE LOGS */}
-        <div className="mt-4">
+        <div className="mt-5">
           <LogPane
             jobId={job.id}
             active={job.status === 'running' || job.status === 'queued'}

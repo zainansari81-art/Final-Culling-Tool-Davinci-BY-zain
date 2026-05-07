@@ -8,7 +8,6 @@ import {
   FolderOpen,
   Loader2,
   Play,
-  Search,
   Sparkles,
   Wand2,
 } from 'lucide-react'
@@ -21,7 +20,6 @@ import OnboardingWizard from '../components/OnboardingWizard'
 import LogPane from '../components/LogPane'
 import {
   HudFrame,
-  HudLabel,
   HudPill,
   HudReadout,
   HudTitleBar,
@@ -140,29 +138,16 @@ export default function HomePage() {
     <div className="min-h-svh">
       <TopBar aiInfo={aiInfo} />
 
-      <main className="mx-auto max-w-[1400px] px-6 pb-16 pt-6">
-        {/* hero / heading */}
-        <div className="mb-6 flex items-end justify-between gap-6">
-          <div>
-            <HudLabel>NEW SESSION · CULL.001</HudLabel>
-            <h1 className="mt-2 text-[28px] font-semibold tracking-tight">
-              Ingest, analyze, send to Resolve.
-            </h1>
-            <p className="mt-1.5 max-w-xl text-[12.5px] text-muted-foreground">
-              Point the tool at your card folder. We score every clip, group
-              duplicates, and hand back ranked selects ready for the timeline.
-            </p>
-          </div>
-          <div className="hidden items-center gap-6 md:flex">
-            <HudReadout label="Engine" value={aiInfo?.label ?? '—'} hint={aiInfo?.backend ?? 'idle'} accent={aiInfo ? 'primary' : 'default'} />
-            <HudReadout label="Jobs" value={jobs.length} hint="LOCAL CACHE" />
-            <HudReadout
-              label="Status"
-              value={activeJob ? activeJob.status.toUpperCase() : 'IDLE'}
-              hint="SESSION"
-              accent={activeJob?.status === 'failed' ? 'destructive' : activeJob ? 'success' : 'default'}
-            />
-          </div>
+      <main className="mx-auto max-w-[1400px] px-6 pb-16 pt-8">
+        {/* hero */}
+        <div className="mb-8">
+          <h1 className="text-[26px] font-semibold tracking-tight">
+            Cull a folder
+          </h1>
+          <p className="mt-1 max-w-xl text-[13.5px] text-muted-foreground">
+            Pick the folder of clips, run analysis, then review the picks
+            and send them to Resolve.
+          </p>
         </div>
 
         {aiInfo?.backend === 'local' && (
@@ -181,27 +166,26 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* Stage strip — 3 connected HUD frames */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[2fr,1fr]">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr,1fr]">
           {/* LEFT: pipeline */}
-          <div className="flex flex-col gap-4">
-            {/* STAGE 01 — INGEST */}
+          <div className="flex flex-col gap-5">
+            {/* STEP 1 — PICK FOLDER */}
             <HudFrame state={pickActive ? 'active' : activeJob ? 'done' : 'idle'}>
               <HudTitleBar
                 index={1}
-                label="INGEST · SOURCE FOLDER"
-                status={pickActive ? 'AWAITING SELECTION' : 'LOCKED'}
+                label="Pick a folder"
+                status={
+                  pickActive
+                    ? 'Choose your card or footage folder'
+                    : 'Locked while analysis runs'
+                }
                 meta={
                   folderPath ? (
-                    <span className="truncate font-mono text-foreground/70">
-                      {folderPath}
-                    </span>
-                  ) : (
-                    <span>NO PATH</span>
-                  )
+                    <span className="truncate font-mono">{folderPath}</span>
+                  ) : null
                 }
               />
-              <div className="grid grid-cols-1 gap-0 lg:grid-cols-[1fr,260px]">
+              <div className="grid grid-cols-1 gap-0 lg:grid-cols-[1fr,280px]">
                 <div className="border-b border-border lg:border-b-0 lg:border-r">
                   <FolderBrowser
                     onSelectionChange={(p, files, count) => {
@@ -212,8 +196,7 @@ export default function HomePage() {
                   />
                 </div>
                 <div className="flex flex-col gap-0">
-                  {/* AI toggle */}
-                  <label className="flex cursor-pointer items-start gap-3 border-b border-border px-3 py-3 transition-colors hover:bg-accent/30">
+                  <label className="flex cursor-pointer items-start gap-3 border-b border-border px-4 py-3 transition-colors hover:bg-accent/30">
                     <Switch
                       checked={enableAi}
                       onCheckedChange={setEnableAi}
@@ -221,29 +204,35 @@ export default function HomePage() {
                       className="mt-0.5"
                     />
                     <div className="flex-1">
-                      <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/80">
-                        <Wand2 className="h-3 w-3" />
-                        AI ANALYSIS
+                      <div className="flex items-center gap-1.5 text-[13px] font-medium">
+                        <Wand2 className="h-3.5 w-3.5 text-[var(--primary)]" />
+                        Use AI analysis
                       </div>
-                      <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+                      <p className="mt-0.5 text-[12px] leading-snug text-muted-foreground">
                         {aiInfo?.backend === 'local'
-                          ? 'Local Qwen2-VL + CLIP. Caption, segment, quality. Runs on this Mac.'
-                          : 'Vertex Gemini. Caption, segment, quality, in/out points. ~30s/clip.'}
+                          ? 'Runs locally on this Mac. Adds captions, segments, and quality scores.'
+                          : 'Uses Vertex Gemini. Adds captions, segments, quality, and trim suggestions (~30s/clip).'}
                       </p>
                     </div>
                   </label>
 
-                  <div className="grid grid-cols-2 gap-3 border-b border-border px-3 py-3">
+                  <div className="grid grid-cols-2 gap-4 border-b border-border px-4 py-3">
                     <HudReadout
                       label="Selected"
-                      value={selectedCount.toString().padStart(3, '0')}
-                      hint="CLIPS"
+                      value={selectedCount}
+                      hint={
+                        selectedCount === 0
+                          ? 'No clips yet'
+                          : selectedCount === 1
+                            ? '1 clip'
+                            : `${selectedCount} clips`
+                      }
                       accent={selectedCount > 0 ? 'primary' : 'default'}
                     />
                     <HudReadout
                       label="Mode"
-                      value={enableAi ? 'AI+HEUR' : 'HEUR'}
-                      hint="PIPELINE"
+                      value={enableAi ? 'AI + checks' : 'Quick checks'}
+                      hint={enableAi ? 'Smarter, slower' : 'Fast, no AI'}
                       align="right"
                     />
                   </div>
@@ -251,30 +240,30 @@ export default function HomePage() {
                   <button
                     onClick={handleAnalyze}
                     disabled={selectedCount === 0 || submitting}
-                    className="hud-cta m-3 justify-center"
+                    className="cta-primary m-4"
                   >
                     {submitting ? (
                       <>
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        STARTING…
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Starting…
                       </>
                     ) : (
                       <>
-                        <Play className="h-3.5 w-3.5 fill-current" />
-                        EXECUTE ANALYSIS
+                        <Play className="h-4 w-4 fill-current" />
+                        Run analysis
                       </>
                     )}
                   </button>
                   {error && (
-                    <div className="border-t border-destructive/40 bg-destructive/10 px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-destructive">
-                      ERR · {error}
+                    <div className="border-t border-destructive/40 bg-destructive/10 px-4 py-2 text-[12px] text-destructive">
+                      {error}
                     </div>
                   )}
                 </div>
               </div>
             </HudFrame>
 
-            {/* STAGE 02 — ANALYZE */}
+            {/* STEP 2 — ANALYZE */}
             <HudFrame
               state={
                 analyzeActive
@@ -283,57 +272,52 @@ export default function HomePage() {
                     ? 'done'
                     : 'pending'
               }
-              scanline={analyzeActive}
             >
               <HudTitleBar
                 index={2}
-                label="ANALYZE · SHAKE / BLUR / DUP"
+                label="Analyze clips"
                 status={
                   !activeJob
-                    ? 'STANDBY'
+                    ? 'Waiting'
                     : activeJob.status === 'done'
-                      ? 'COMPLETE'
-                      : `RUNNING ${Math.round(activeJob.progress)}%`
-                }
-                meta={
-                  activeJob ? `JOB ${activeJob.id.slice(0, 6).toUpperCase()}` : '—'
+                      ? 'Done'
+                      : `Running · ${Math.round(activeJob.progress)}%`
                 }
               />
               {!activeJob ? (
-                <div className="hud-hatch flex flex-col items-center justify-center px-4 py-12 text-center">
-                  <HudLabel>AWAITING DISPATCH</HudLabel>
-                  <p className="mt-2 max-w-md text-[11px] text-muted-foreground">
-                    Once you execute analysis, scoring + duplicate detection
-                    runs here in real-time.
+                <div className="flex flex-col items-center justify-center px-4 py-12 text-center">
+                  <p className="max-w-md text-[13px] text-muted-foreground">
+                    We score every clip for shake, blur, and exposure, then
+                    group duplicates. This kicks in when you run analysis.
                   </p>
                 </div>
               ) : (
-                <div className="space-y-4 px-4 py-4">
+                <div className="space-y-5 px-5 py-5">
                   <SegProgress
                     value={activeJob.progress}
-                    segments={32}
                     variant={
                       activeJob.status === 'done' ? 'success' : 'primary'
                     }
                   />
-                  <div className="grid grid-cols-4 gap-4">
+                  <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
                     <HudReadout
                       label="Progress"
                       value={`${Math.round(activeJob.progress)}%`}
-                      hint="OF TOTAL"
                       accent="primary"
                     />
                     <HudReadout
-                      label="Clips"
-                      value={(activeJob.clips.length || selectedCount)
-                        .toString()
-                        .padStart(3, '0')}
-                      hint="DISCOVERED"
+                      label="Clips found"
+                      value={activeJob.clips.length || selectedCount}
                     />
                     <HudReadout
-                      label="State"
-                      value={activeJob.status.toUpperCase()}
-                      hint="JOB"
+                      label="Status"
+                      value={
+                        activeJob.status === 'done'
+                          ? 'Done'
+                          : activeJob.status === 'failed'
+                            ? 'Failed'
+                            : 'Running'
+                      }
                       accent={
                         activeJob.status === 'failed'
                           ? 'destructive'
@@ -343,16 +327,15 @@ export default function HomePage() {
                       }
                     />
                     <HudReadout
-                      label="Source"
+                      label="Folder"
                       value={folderPath.split('/').pop() || '—'}
-                      hint="FOLDER"
                       align="right"
                     />
                   </div>
 
                   {activeJob.status === 'failed' && activeJob.error && (
-                    <div className="border border-destructive/40 bg-destructive/10 px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-destructive">
-                      ERR · {activeJob.error}
+                    <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
+                      {activeJob.error}
                     </div>
                   )}
 
@@ -367,37 +350,35 @@ export default function HomePage() {
               )}
             </HudFrame>
 
-            {/* STAGE 03 — REVIEW */}
+            {/* STEP 3 — REVIEW */}
             <HudFrame state={reviewReady ? 'active' : 'pending'}>
               <HudTitleBar
                 index={3}
-                label="REVIEW · DISPATCH TO RESOLVE"
-                status={reviewReady ? 'READY' : 'STANDBY'}
-                meta={reviewReady ? `${activeJob.clips.length} CLIPS` : '—'}
+                label="Review &amp; export"
+                status={
+                  reviewReady
+                    ? `${activeJob.clips.length} clips ready`
+                    : 'Available after analysis'
+                }
               />
               {reviewReady ? (
-                <div className="flex items-center justify-between px-4 py-4">
-                  <div className="flex items-center gap-4">
-                    <HudReadout
-                      label="Clips ready"
-                      value={activeJob.clips.length.toString().padStart(3, '0')}
-                      hint="QUEUED FOR REVIEW"
-                      accent="success"
-                    />
+                <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-5">
+                  <div className="text-[13px] text-muted-foreground">
+                    Approve the keepers, mark a few near-misses, and send the
+                    selects to Resolve or FCPXML.
                   </div>
                   <button
-                    className="hud-cta"
+                    className="cta-primary"
                     onClick={() => navigate(`/jobs/${activeJob.id}`)}
                   >
-                    OPEN REVIEW
-                    <ArrowRight className="h-3.5 w-3.5" />
+                    Open review
+                    <ArrowRight className="h-4 w-4" />
                   </button>
                 </div>
               ) : (
-                <div className="hud-hatch px-4 py-10 text-center">
-                  <HudLabel>STAGE LOCKED</HudLabel>
-                  <p className="mt-2 text-[11px] text-muted-foreground">
-                    Unlocks once analysis completes.
+                <div className="px-5 py-7 text-center">
+                  <p className="text-[13px] text-muted-foreground">
+                    Once analysis finishes, you'll review and approve clips here.
                   </p>
                 </div>
               )}
@@ -405,22 +386,23 @@ export default function HomePage() {
           </div>
 
           {/* RIGHT: recent jobs sidebar */}
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-5">
             <HudFrame>
-              <HudTitleBar label="RECENT JOBS" meta={`${jobs.length} TOTAL`} />
+              <HudTitleBar
+                label="Recent jobs"
+                meta={`${jobs.length} total`}
+              />
               <div className="divide-y divide-border">
                 {loadingJobs && (
-                  <div className="space-y-2 px-3 py-3">
+                  <div className="space-y-2 p-3">
                     <Skeleton className="h-12 w-full" />
                     <Skeleton className="h-12 w-full" />
                     <Skeleton className="h-12 w-full" />
                   </div>
                 )}
                 {!loadingJobs && recentJobs.length === 0 && (
-                  <div className="hud-hatch px-3 py-8 text-center">
-                    <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                      NO JOBS · BEGIN A SESSION
-                    </p>
+                  <div className="px-4 py-8 text-center text-[12.5px] text-muted-foreground">
+                    No jobs yet. Pick a folder to start.
                   </div>
                 )}
                 {recentJobs.map((j) => (
@@ -430,23 +412,27 @@ export default function HomePage() {
             </HudFrame>
 
             <HudFrame>
-              <HudTitleBar label="SYSTEM" />
-              <div className="grid grid-cols-2 gap-3 px-3 py-3">
+              <HudTitleBar label="System" />
+              <div className="grid grid-cols-2 gap-4 px-4 py-3">
                 <HudReadout
                   label="Backend"
-                  value={aiInfo?.backend?.toUpperCase() ?? 'OFFLINE'}
+                  value={
+                    aiInfo?.backend
+                      ? aiInfo.backend === 'local'
+                        ? 'Local'
+                        : 'Cloud'
+                      : 'Offline'
+                  }
                   accent={aiInfo ? 'success' : 'destructive'}
                 />
                 <HudReadout
-                  label="Model"
+                  label="Engine"
                   value={aiInfo?.label ?? '—'}
                   align="right"
-                  hint={aiInfo?.vlm_model?.slice(0, 20) ?? ''}
                 />
               </div>
-              <div className="border-t border-border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70">
-                <span className="text-success">●</span> ONLINE · v1.0 ·
-                LOCAL :: 127.0.0.1
+              <div className="border-t border-border bg-muted/30 px-4 py-2 text-[11.5px] text-muted-foreground">
+                <span className="text-success">●</span> Online · v1.0
               </div>
             </HudFrame>
           </div>
@@ -458,66 +444,31 @@ export default function HomePage() {
 
 function TopBar({ aiInfo }: { aiInfo: AiInfo | null }) {
   return (
-    <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur-md">
-      <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-6 py-2.5">
+    <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur-md">
+      <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-6 py-3">
         <div className="flex items-center gap-3">
-          <div className="flex h-7 w-7 items-center justify-center border border-primary/40 bg-primary/15">
-            <Film className="h-3.5 w-3.5 text-[var(--primary)]" />
+          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-gradient-to-br from-primary to-[color-mix(in_srgb,var(--primary)_70%,#c2410c)] text-primary-foreground shadow-[0_0_18px_-4px_color-mix(in_srgb,var(--primary)_70%,transparent)]">
+            <Film className="h-4 w-4" />
           </div>
-          <div className="flex items-baseline gap-2">
-            <span className="font-mono text-[13px] font-semibold uppercase tracking-[0.18em]">
-              CULL
-            </span>
-            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-              ⌘ DAVINCI · WEDDING CULLER
+          <div className="flex flex-col leading-tight">
+            <span className="text-[14px] font-semibold tracking-tight">Cull</span>
+            <span className="text-[10.5px] text-muted-foreground">
+              for DaVinci Resolve
             </span>
           </div>
-          <span className="tick" />
-          <nav className="hidden items-center gap-1 md:flex">
-            <NavItem active>SESSION</NavItem>
-            <NavItem>LIBRARY</NavItem>
-            <NavItem>SETTINGS</NavItem>
-          </nav>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="hidden items-center gap-2 border border-border bg-muted/40 px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground md:inline-flex"
-          >
-            <Search className="h-3 w-3" />
-            <span>QUICK SEARCH</span>
-            <kbd className="ml-2 border border-border-strong px-1 py-px text-[9px]">
-              ⌘K
-            </kbd>
-          </button>
           <HudPill tone={aiInfo ? 'success' : 'destructive'}>
-            <Cpu className="h-2.5 w-2.5" />
-            {aiInfo ? `${aiInfo.label}` : 'OFFLINE'}
+            <Cpu className="h-3 w-3" />
+            {aiInfo
+              ? aiInfo.backend === 'local'
+                ? 'Local'
+                : 'Cloud'
+              : 'Offline'}
           </HudPill>
         </div>
       </div>
     </header>
-  )
-}
-
-function NavItem({
-  children,
-  active,
-}: {
-  children: React.ReactNode
-  active?: boolean
-}) {
-  return (
-    <button
-      className={cn(
-        'border-b-2 px-2 py-1 font-mono text-[11px] uppercase tracking-[0.16em] transition-colors',
-        active
-          ? 'border-primary text-foreground'
-          : 'border-transparent text-muted-foreground hover:text-foreground',
-      )}
-    >
-      {children}
-    </button>
   )
 }
 
@@ -540,44 +491,42 @@ function JobRow({ job }: { job: AnalysisJob }) {
     const sec = Math.max(0, (end - start) / 1000)
     const m = Math.floor(sec / 60)
     const s = sec - m * 60
-    return m > 0 ? `${m}m${s.toFixed(0)}s` : `${s.toFixed(1)}s`
+    return m > 0 ? `${m}m ${s.toFixed(0)}s` : `${s.toFixed(1)}s`
   })()
+  const label =
+    job.status === 'done'
+      ? 'Ready'
+      : job.status === 'failed'
+        ? 'Failed'
+        : isActive
+          ? `${Math.round(job.progress)}%`
+          : 'Idle'
   return (
     <Link
       to={`/jobs/${job.id}`}
-      className="block px-3 py-2.5 transition-colors hover:bg-accent/30"
+      className="block px-4 py-3 transition-colors hover:bg-accent/30"
     >
       <div className="mb-1 flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <FolderOpen className="h-3 w-3 shrink-0 text-muted-foreground" />
-          <span className="truncate font-mono text-[11px] font-medium">
+          <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate text-[12.5px] font-medium">
             {job.folder_path.split('/').pop() || job.folder_path}
           </span>
         </div>
-        <HudPill tone={tone}>
-          {job.status === 'done'
-            ? '✓ READY'
-            : job.status === 'failed'
-              ? '× FAIL'
-              : isActive
-                ? `${Math.round(job.progress)}%`
-                : 'IDLE'}
-        </HudPill>
+        <HudPill tone={tone}>{label}</HudPill>
       </div>
-      <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70">
+      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
         <span className="flex items-center gap-1">
-          <Clock className="h-2.5 w-2.5" />
+          <Clock className="h-3 w-3" />
           {formatDate(job.created_at)}
         </span>
-        {elapsed && <span className="tabular-nums">⏱ {elapsed}</span>}
+        {elapsed && <span className="tabular-nums">{elapsed}</span>}
       </div>
-      {isActive && (
-        <SegProgress value={job.progress} segments={28} className="mt-2 h-[3px]" />
-      )}
+      {isActive && <SegProgress value={job.progress} className={cn('mt-2')} />}
     </Link>
   )
 }
 
-// Keep import surface stable: Sparkles re-export prevents tree-shaker complaints
+// keep tree-shaker friendly
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const _keep = { Sparkles }

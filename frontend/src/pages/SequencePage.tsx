@@ -213,45 +213,40 @@ export default function SequencePage() {
   return (
     <div className="min-h-svh pb-20">
       <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-5 py-2.5">
-          <div className="flex items-center gap-2">
-            <Button asChild variant="ghost" size="icon" className="h-7 w-7">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-5 py-3">
+          <div className="flex items-center gap-3">
+            <Button asChild variant="ghost" size="icon" className="h-8 w-8">
               <Link to={`/jobs/${id}`} aria-label="Back to review">
-                <ArrowLeft className="h-3.5 w-3.5" />
+                <ArrowLeft className="h-4 w-4" />
               </Link>
             </Button>
-            <span className="tick" />
-            <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-              REVIEW
-            </span>
-            <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-              ›
-            </span>
-            <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-foreground">
-              SEQUENCE
-            </span>
-            <Clapperboard className="ml-2 h-3.5 w-3.5 text-[var(--primary)]" />
+            <Clapperboard className="h-4 w-4 text-[var(--primary)]" />
+            <h1 className="text-[14px] font-semibold tracking-tight">
+              Sequence editor
+            </h1>
           </div>
-          <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em]">
-            <span className="border border-border bg-muted/40 px-2 py-1">
-              <span className="tabular-nums text-foreground">{stats.total}</span>
-              <span className="ml-1 text-muted-foreground">CLIPS</span>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-muted-foreground">
+            <span>
+              <span className="tabular-nums font-medium text-foreground">{stats.total}</span>{' '}
+              clips
             </span>
-            <span className="border border-success/40 bg-success/10 px-2 py-1 text-[var(--success)]">
-              <span className="tabular-nums">{stats.aroll}</span>
-              <span className="ml-1 opacity-80">A-ROLL</span>
+            <span className="text-muted-foreground/40">·</span>
+            <span>
+              <span className="tabular-nums font-medium text-[var(--success)]">{stats.aroll}</span>{' '}
+              A-roll
             </span>
-            <span className="border border-border bg-muted/40 px-2 py-1">
-              <span className="tabular-nums text-foreground">{stats.broll}</span>
-              <span className="ml-1 text-muted-foreground">B-ROLL</span>
+            <span className="text-muted-foreground/40">·</span>
+            <span>
+              <span className="tabular-nums font-medium">{stats.broll}</span> B-roll
             </span>
-            <span className="border border-border bg-muted/40 px-2 py-1">
-              <span className="tabular-nums text-foreground">{stats.words}</span>
-              <span className="ml-1 text-muted-foreground">WORDS</span>
+            <span className="text-muted-foreground/40">·</span>
+            <span>
+              <span className="tabular-nums font-medium">{stats.words}</span> words
             </span>
-            <span className="border border-primary/40 bg-primary/10 px-2 py-1 text-[var(--primary)]">
-              <span className="tabular-nums">{stats.avgConf}%</span>
-              <span className="ml-1 opacity-80">CONF</span>
+            <span className="text-muted-foreground/40">·</span>
+            <span>
+              <span className="tabular-nums font-medium text-[var(--primary)]">{stats.avgConf}%</span>{' '}
+              avg confidence
             </span>
           </div>
         </div>
