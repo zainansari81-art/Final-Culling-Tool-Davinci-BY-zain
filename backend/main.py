@@ -22,6 +22,7 @@ import re
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
 
 from analyzer import SUPPORTED_EXTENSIONS, analyze_folder
 from fcpxml_export import export_to_fcpxml
@@ -218,25 +219,96 @@ def warmup_logs(since: int = 0) -> Dict[str, Any]:
     return {"lines": new_lines, "total": total}
 
 
+# ─────────────────────────── Cloud onboarding ───────────────────────────────
+
+
+class CloudKeyBody(BaseModel):
+    api_key: str
+
+
+@app.get("/onboarding/status", summary="Cloud onboarding status")
+def onboarding_status() -> Dict[str, Any]:
+    import cloud_credentials
+    return {
+        "provider": "gemini",
+        "has_key": cloud_credentials.has_gemini_api_key(),
+    }
+
+
+@app.post("/onboarding/test", summary="Validate a Gemini API key without saving")
+def onboarding_test(body: CloudKeyBody) -> Dict[str, Any]:
+    import cloud_credentials
+    key = body.api_key.strip()
+    if not cloud_credentials.looks_like_gemini_key(key):
+        return {"ok": False, "error": "That doesn't look like a Google AI Studio key. They start with 'AIza' and are at least 30 characters."}
+    try:
+        from google import genai
+        client = genai.Client(api_key=key)
+        # Minimal call so we don't burn the user's quota — just list models.
+        # If the key is bad, this raises immediately.
+        list(client.models.list())
+        return {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        # Log full error server-side, return a scrubbed message to the
+        # browser. Google SDK exception strings have been seen to echo
+        # back the key on auth failure — never expose them as-is.
+        logger.warning("onboarding_test failed: %s: %s", type(exc).__name__, exc)
+        scrubbed = type(exc).__name__
+        msg = str(exc)
+        if "401" in msg or "PermissionDenied" in scrubbed or "INVALID_ARGUMENT" in msg:
+            return {"ok": False, "error": "Key was rejected. Make sure you copied the whole key from AI Studio."}
+        if "ConnectError" in scrubbed or "Timeout" in scrubbed or "Network" in scrubbed:
+            return {"ok": False, "error": "Couldn't reach Google. Check your internet connection."}
+        return {"ok": False, "error": f"Validation failed ({scrubbed}). See server logs for details."}
+
+
+@app.post("/onboarding/save", summary="Persist a validated Gemini API key")
+def onboarding_save(body: CloudKeyBody) -> Dict[str, Any]:
+    import cloud_credentials
+    key = body.api_key.strip()
+    if not cloud_credentials.looks_like_gemini_key(key):
+        raise HTTPException(status_code=400, detail="API key shape invalid")
+    cloud_credentials.save_gemini_api_key(key)
+    return {"ok": True, "provider": "gemini"}
+
+
+@app.delete("/onboarding/key", summary="Remove the stored Gemini API key")
+def onboarding_delete() -> Dict[str, Any]:
+    import cloud_credentials
+    removed = cloud_credentials.delete_gemini_api_key()
+    return {"removed": removed}
+
+
 @app.get("/ai/info", summary="Active AI backend info")
 def ai_info() -> Dict[str, Any]:
     import os as _os
     import ai_backend
+    import cloud_credentials
     backend = ai_backend.BACKEND
     if backend == "local":
         return {
             "backend": "local",
             "label": "Local (MLX)",
             "vlm_model": _os.environ.get(
-                "LOCAL_VLM_MODEL", "mlx-community/Qwen2-VL-2B-Instruct-4bit",
+                "LOCAL_VLM_MODEL", "mlx-community/Qwen2.5-VL-3B-Instruct-4bit",
             ),
             "clip_model": _os.environ.get("LOCAL_CLIP_MODEL", "ViT-B-32"),
+            "has_key": True,
+        }
+    if backend == "cloud":
+        return {
+            "backend": "cloud",
+            "label": "Cloud (Gemini via AI Studio)",
+            "vlm_model": _os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+            "clip_model": "ViT-B-32",  # local CLIP still augments cloud Gemini
+            "has_key": cloud_credentials.has_gemini_api_key(),
         }
     return {
         "backend": "vertex",
         "label": "Cloud (Vertex)",
         "vlm_model": _os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
         "clip_model": None,
+        "has_key": True,
     }
 
 

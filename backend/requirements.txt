@@ -13,3 +13,4 @@ google-cloud-storage
 google-cloud-aiplatform
 google-genai
 faster-whisper
+keyring                # OS keychain wrapper for cloud API key storage
