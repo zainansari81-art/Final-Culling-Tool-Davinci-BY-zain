@@ -128,43 +128,29 @@ export default function HomePage() {
     )
   }
 
-  // Sidebar content: Recent jobs list (compact)
+  // Sidebar: list of sessions with working indicators (Claude-desktop style)
   const sidebar = (
-    <div className="flex flex-col">
-      <div className="px-3 pt-3 pb-2">
-        <button
-          className="cta-primary w-full"
-          onClick={() => setNewSessionOpen(true)}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          New session
-        </button>
-      </div>
-      <div className="px-3 pb-2 text-[10.5px] uppercase tracking-wider text-muted-foreground/80">
-        Recent
-      </div>
-      <div className="flex flex-col">
-        {loadingJobs && (
-          <div className="space-y-2 px-3 pb-3">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-          </div>
-        )}
-        {!loadingJobs && recentJobs.length === 0 && (
-          <p className="px-3 pb-3 text-[12px] text-muted-foreground">
-            No jobs yet.
-          </p>
-        )}
-        {recentJobs.map((j) => (
-          <SidebarJobItem key={j.id} job={j} />
-        ))}
-      </div>
+    <div className="flex flex-col py-1">
+      {loadingJobs && (
+        <div className="space-y-1.5 px-2 py-1">
+          <Skeleton className="h-7 w-full" />
+          <Skeleton className="h-7 w-full" />
+          <Skeleton className="h-7 w-full" />
+        </div>
+      )}
+      {!loadingJobs && recentJobs.length === 0 && (
+        <p className="px-3 py-3 text-[12px] text-muted-foreground/80">
+          No sessions yet.
+        </p>
+      )}
+      {recentJobs.map((j) => (
+        <SidebarJobItem key={j.id} job={j} />
+      ))}
     </div>
   )
 
   return (
-    <Shell sidebar={sidebar} sidebarTitle="Library">
+    <Shell sidebar={sidebar} sidebarTitle="Sessions">
       {aiInfo?.backend === 'cloud' && !aiInfo.has_key && (
         <div className="border-b border-border bg-card px-4 py-3">
           <OnboardingWizard
@@ -176,28 +162,23 @@ export default function HomePage() {
       )}
 
       <div className="min-h-0 flex-1 overflow-auto">
-        {/* Hero / start panel */}
-        <div className="border-b border-border bg-card">
-          <div className="mx-auto max-w-3xl px-5 py-8">
-            <h1 className="text-[20px] font-semibold tracking-tight">
-              Library
+        {/* Hero — clean welcome with single CTA */}
+        <div className="border-b border-border bg-card/40">
+          <div className="mx-auto flex max-w-3xl flex-col items-start gap-3 px-5 py-7">
+            <h1 className="text-[18px] font-semibold tracking-tight">
+              Start a new session
             </h1>
-            <p className="mt-1 text-[12.5px] text-muted-foreground">
-              Pick a folder of clips. Cull scores them, finds duplicates, and
-              hands ranked selects to Resolve.
+            <p className="text-[12.5px] text-muted-foreground">
+              Pick a folder of clips. Cull scores them, finds duplicates,
+              and hands ranked selects to Resolve.
             </p>
-            <div className="mt-4 flex items-center gap-2">
-              <button
-                className="cta-primary"
-                onClick={() => setNewSessionOpen(true)}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                New session
-              </button>
-              <span className="text-[12px] text-muted-foreground">
-                or pick a recent job
-              </span>
-            </div>
+            <button
+              className="cta-primary"
+              onClick={() => setNewSessionOpen(true)}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              New session
+            </button>
           </div>
         </div>
 
@@ -210,7 +191,7 @@ export default function HomePage() {
         {/* Recent jobs grid */}
         <div className="mx-auto max-w-6xl px-5 py-5">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-[13px] font-semibold">Recent jobs</h2>
+            <h2 className="text-[13px] font-semibold">Recent sessions</h2>
             <span className="text-[11.5px] text-muted-foreground">
               {jobs.length} total
             </span>
@@ -226,7 +207,7 @@ export default function HomePage() {
 
           {!loadingJobs && jobs.length === 0 && (
             <div className="flex h-40 items-center justify-center rounded-md border border-dashed border-border bg-card/40 text-[12.5px] text-muted-foreground">
-              No jobs yet. Start a new session to begin.
+              No sessions yet. Start a new session to begin.
             </div>
           )}
 
@@ -243,11 +224,11 @@ export default function HomePage() {
       {/* New session dialog */}
       <Dialog open={newSessionOpen} onOpenChange={setNewSessionOpen}>
         <DialogContent
-          className="flex h-[78vh] w-[min(720px,94vw)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[720px]"
+          className="flex h-[78vh] w-[min(720px,94vw)] flex-col gap-0 overflow-hidden border border-border/70 bg-card p-0 shadow-2xl shadow-black/60 sm:max-w-[720px]"
           showCloseButton
         >
           <DialogHeader className="border-b border-border bg-panel-header px-4 py-3">
-            <DialogTitle className="text-[14px] font-semibold tracking-tight">
+            <DialogTitle className="text-[13.5px] font-semibold tracking-tight">
               New session
             </DialogTitle>
             <DialogDescription className="text-[12px]">
@@ -341,38 +322,29 @@ export default function HomePage() {
 
 function SidebarJobItem({ job }: { job: AnalysisJob }) {
   const isActive = job.status === 'running' || job.status === 'queued'
-  const tone =
-    job.status === 'done'
-      ? 'success'
-      : job.status === 'failed'
-        ? 'destructive'
-        : isActive
-          ? 'primary'
-          : 'default'
+  const name = job.folder_path.split('/').pop() || job.folder_path
   return (
     <Link
       to={`/jobs/${job.id}`}
-      className="block px-3 py-2 transition-colors hover:bg-accent/40"
+      className="mx-1 flex items-center gap-2 rounded-sm px-2 py-1.5 text-[12.5px] transition-colors hover:bg-accent/60"
+      title={name}
     >
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <FolderOpen className="h-3 w-3 shrink-0 text-muted-foreground" />
-          <span className="truncate text-[12px] font-medium">
-            {job.folder_path.split('/').pop() || job.folder_path}
-          </span>
-        </div>
-        <Tone tone={tone} />
-      </div>
-      <div className="mt-0.5 flex items-center justify-between text-[10.5px] text-muted-foreground/80">
-        <span>{formatDate(job.created_at)}</span>
-        {isActive && (
-          <span className="tabular-nums">{Math.round(job.progress)}%</span>
+      <span className="flex h-3 w-3 shrink-0 items-center justify-center">
+        {isActive ? (
+          <Loader2 className="h-3 w-3 animate-spin text-[var(--primary)]" />
+        ) : job.status === 'failed' ? (
+          <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+        ) : (
+          <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
         )}
-      </div>
+      </span>
+      <span className="min-w-0 flex-1 truncate text-foreground/90">
+        {name}
+      </span>
       {isActive && (
-        <div className="smooth-progress mt-1.5">
-          <i style={{ width: `${job.progress}%` }} />
-        </div>
+        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+          {Math.round(job.progress)}%
+        </span>
       )}
     </Link>
   )
@@ -450,12 +422,3 @@ function JobCard({ job }: { job: AnalysisJob }) {
   )
 }
 
-function Tone({ tone }: { tone: 'success' | 'destructive' | 'primary' | 'default' }) {
-  const cls = {
-    success: 'bg-success',
-    destructive: 'bg-destructive',
-    primary: 'bg-primary',
-    default: 'bg-muted-foreground/50',
-  }[tone]
-  return <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', cls)} />
-}

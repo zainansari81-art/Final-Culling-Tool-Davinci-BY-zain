@@ -150,7 +150,7 @@ export default function Shell({
           <TabsList className="h-8 bg-muted">
             <TabsTrigger value="library" className="gap-1.5 px-3 text-[12px]">
               <FolderOpen className="h-3.5 w-3.5" />
-              Library
+              Sessions
             </TabsTrigger>
             <TabsTrigger
               value="review"
@@ -178,7 +178,7 @@ export default function Shell({
         {/* MOBILE compact tab strip */}
         <Tabs value={activeTab} onValueChange={handleTab} className="sm:hidden">
           <TabsList className="h-8 bg-muted">
-            <TabsTrigger value="library" className="px-2 text-[11px]">Lib</TabsTrigger>
+            <TabsTrigger value="library" className="px-2 text-[11px]">Sess</TabsTrigger>
             <TabsTrigger value="review" disabled={reviewDisabled} className="px-2 text-[11px]">Review</TabsTrigger>
             <TabsTrigger value="sequence" disabled={sequenceDisabled} className="px-2 text-[11px]">Seq</TabsTrigger>
           </TabsList>
