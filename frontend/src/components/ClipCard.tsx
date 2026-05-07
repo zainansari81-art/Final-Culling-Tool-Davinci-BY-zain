@@ -108,18 +108,28 @@ export default function ClipCard({
     }
   }, [clip]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const segIdx = Math.max(0, SEGMENTS.indexOf(clip.suggested_segment))
+  const segColorVar = `var(--tag-${(segIdx % 8) + 1})`
+
   return (
     <div
       ref={cardRef}
       onClick={onSelect}
       className={cn(
-        'group relative flex flex-col overflow-hidden rounded-xl border bg-card transition-all',
-        'border-border/70 hover:border-border hover:bg-card/80',
-        isSelected && 'ring-2 ring-ring ring-offset-2 ring-offset-background',
-        clip.approved === true && 'border-success/40',
+        'group relative flex bg-card transition-all',
+        'overflow-hidden rounded-md border border-border/70 hover:border-border-strong hover:bg-card/90',
+        isSelected && 'ring-1 ring-primary ring-offset-2 ring-offset-background',
+        clip.approved === true && 'border-success/50',
         clip.approved === false && 'opacity-55',
       )}
     >
+      <span
+        aria-hidden
+        className="clip-tag"
+        style={{ background: segColorVar }}
+        title={clip.suggested_segment}
+      />
+      <div className="flex min-w-0 flex-1 flex-col">
       <button
         type="button"
         onClick={(e) => {
@@ -174,20 +184,20 @@ export default function ClipCard({
             </Badge>
           )}
         </div>
-        <div className="absolute bottom-2 right-2 rounded-md bg-background/80 px-1.5 py-0.5 text-[11px] tabular-nums text-foreground backdrop-blur">
+        <div className="absolute bottom-1.5 right-1.5 rounded-sm border border-white/10 bg-black/70 px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-foreground backdrop-blur">
           {fmtDuration(clip.duration_sec)}
         </div>
         {clip.analysis_sec != null && (
           <div
-            className="absolute bottom-2 left-2 rounded-md bg-background/80 px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground backdrop-blur"
+            className="absolute bottom-1.5 left-1.5 rounded-sm border border-white/10 bg-black/70 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-muted-foreground backdrop-blur"
             title={`Analysis took ${clip.analysis_sec.toFixed(2)} s`}
           >
             ⏱ {clip.analysis_sec.toFixed(1)}s
           </div>
         )}
         {clip.approved === true && (
-          <div className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-success text-success-foreground shadow-sm">
-            <Check className="h-3.5 w-3.5" />
+          <div className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-sm bg-success text-success-foreground shadow-sm">
+            <Check className="h-3 w-3" />
           </div>
         )}
         {clip.rank_in_group === 1 && clip.approved !== true && (
@@ -203,20 +213,19 @@ export default function ClipCard({
       <div className="flex flex-col gap-2.5 p-3">
         <div className="flex items-center gap-1.5">
           <div
-            className="min-w-0 flex-1 truncate text-xs font-medium"
+            className="min-w-0 flex-1 truncate font-mono text-[11px] font-medium text-foreground"
             title={clip.filename}
           >
             {clip.filename}
           </div>
           {clip.ai_quality != null && (
-            <Badge
-              variant="secondary"
-              className="h-5 shrink-0 gap-1 px-1.5 text-[10px]"
+            <span
+              className="flex h-5 shrink-0 items-center gap-1 rounded-sm border border-primary/30 bg-primary/10 px-1.5 font-mono text-[10px] font-semibold tabular-nums text-primary"
               title={`AI quality ${clip.ai_quality.toFixed(1)}/10`}
             >
               <Sparkles className="h-2.5 w-2.5" />
               {clip.ai_quality.toFixed(1)}
-            </Badge>
+            </span>
           )}
         </div>
 
@@ -278,7 +287,8 @@ export default function ClipCard({
         })()}
 
         <select
-          className="h-7 rounded-md border border-border bg-input px-2 text-xs outline-none transition-colors focus:border-ring"
+          className="h-7 rounded-sm border border-border bg-input px-2 font-mono text-[11px] outline-none transition-colors focus:border-primary"
+          style={{ borderLeftWidth: 3, borderLeftColor: segColorVar }}
           value={clip.suggested_segment}
           onChange={handleSegment}
           onClick={(e) => e.stopPropagation()}
@@ -402,14 +412,15 @@ export default function ClipCard({
         </div>
       </div>
 
-      <VideoPreview
-        open={previewOpen}
-        onOpenChange={setPreviewOpen}
-        jobId={jobId}
-        clip={clip}
-        onApprove={handleApprove}
-        onReject={handleReject}
-      />
+        <VideoPreview
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          jobId={jobId}
+          clip={clip}
+          onApprove={handleApprove}
+          onReject={handleReject}
+        />
+      </div>
     </div>
   )
 }
@@ -429,18 +440,23 @@ function ScoreBar({
   return (
     <div
       className={cn(
-        'flex flex-col gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-1',
-        bad && 'border-warning/40 bg-warning/10',
+        'flex flex-col gap-1 rounded-sm border border-border/60 bg-rail px-1.5 py-1 font-mono',
+        bad && 'border-warning/40 bg-warning/5',
       )}
       title={`${label}: ${(score).toFixed(2)}`}
     >
-      <div className="flex items-center justify-between text-[10px]">
+      <div className="flex items-center justify-between text-[9px] uppercase tracking-wider">
         <span className="text-muted-foreground">{label}</span>
-        <span className="tabular-nums font-medium">{Math.round(pct)}</span>
+        <span className="tabular-nums font-medium text-foreground">
+          {Math.round(pct)}
+        </span>
       </div>
-      <div className="h-1 overflow-hidden rounded-full bg-muted">
+      <div className="h-[3px] overflow-hidden rounded-sm bg-muted">
         <div
-          className={cn('h-full', bad ? 'bg-warning' : 'bg-foreground/60')}
+          className={cn(
+            'h-full transition-all',
+            bad ? 'bg-warning' : 'bg-gradient-to-r from-success/80 via-success to-primary/80',
+          )}
           style={{ width: `${pct}%` }}
         />
       </div>

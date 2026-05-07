@@ -4,30 +4,44 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: #0a0a0b;
-  --foreground: #ededed;
-  --card: #131316;
-  --card-foreground: #ededed;
-  --popover: #18181c;
-  --popover-foreground: #ededed;
-  --primary: #ededed;
-  --primary-foreground: #0a0a0b;
-  --secondary: #1f1f24;
-  --secondary-foreground: #ededed;
-  --muted: #1a1a1d;
-  --muted-foreground: #8a8a93;
-  --accent: #1f1f24;
-  --accent-foreground: #ededed;
-  --destructive: #f15858;
+  /* Resolve-plugin charcoal palette with signature amber + teal accents. */
+  --background: #0d0e10;
+  --foreground: #e7e7ea;
+  --card: #16181b;
+  --card-foreground: #e7e7ea;
+  --popover: #1b1d21;
+  --popover-foreground: #e7e7ea;
+  --primary: #ff8a3c;
+  --primary-foreground: #1a1208;
+  --secondary: #1f2228;
+  --secondary-foreground: #e7e7ea;
+  --muted: #181a1e;
+  --muted-foreground: #8b8d94;
+  --accent: #232730;
+  --accent-foreground: #f4f4f6;
+  --destructive: #ef4d56;
   --destructive-foreground: #ffffff;
-  --border: #26262c;
-  --input: #1f1f24;
-  --ring: #4f8ef7;
-  --success: #22c55e;
-  --success-foreground: #ffffff;
-  --warning: #f59e0b;
-  --info: #4f8ef7;
-  --radius: 0.625rem;
+  --border: #25282e;
+  --border-strong: #353941;
+  --input: #1d2026;
+  --ring: #ff8a3c;
+  --success: #2ecc71;
+  --success-foreground: #08130c;
+  --warning: #f5a524;
+  --info: #2dd4bf;
+  --rail: #0a0b0d;
+  --panel-header: #1a1c20;
+  --radius: 0.375rem;
+
+  /* Resolve segment color tags (clip-bin coding). */
+  --tag-1: #e84e6c;
+  --tag-2: #f5a524;
+  --tag-3: #2dd4bf;
+  --tag-4: #4f8ef7;
+  --tag-5: #b362ff;
+  --tag-6: #2ecc71;
+  --tag-7: #ff8a3c;
+  --tag-8: #94a3b8;
 }
 
 @theme inline {
@@ -48,18 +62,22 @@
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
   --color-warning: var(--warning);
   --color-info: var(--info);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
+  --color-rail: var(--rail);
+  --color-panel-header: var(--panel-header);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
   --radius-xl: calc(var(--radius) + 4px);
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
     Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
 }
 
 @layer base {
@@ -68,7 +86,11 @@
   }
   html, body {
     height: 100%;
-    background: var(--background);
+    background:
+      radial-gradient(ellipse 80% 50% at 50% -10%,
+        color-mix(in srgb, var(--primary) 6%, transparent) 0%,
+        transparent 60%),
+      var(--background);
     color: var(--foreground);
     color-scheme: dark;
     font-feature-settings: "cv11", "ss01";
@@ -77,6 +99,7 @@
   }
   body {
     font-family: var(--font-sans);
+    font-size: 13px;
   }
   #root {
     min-height: 100svh;
@@ -85,18 +108,52 @@
     background: color-mix(in srgb, var(--ring) 35%, transparent);
   }
   ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 9px;
+    height: 9px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--border);
+    background: var(--border-strong);
     border: 2px solid var(--background);
     border-radius: 999px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: color-mix(in srgb, var(--border) 50%, var(--muted-foreground));
+    background: color-mix(in srgb, var(--border-strong) 50%, var(--muted-foreground));
+  }
+  .tabular-nums, kbd, code, .font-mono {
+    font-feature-settings: "tnum", "ss01";
+  }
+}
+
+@layer components {
+  /* Plugin panel header bar — Resolve dock chrome. */
+  .panel-bar {
+    background:
+      linear-gradient(180deg,
+        color-mix(in srgb, var(--panel-header) 100%, transparent) 0%,
+        var(--panel-header) 100%);
+    border-bottom: 1px solid var(--border);
+    box-shadow: inset 0 1px 0 0 color-mix(in srgb, white 4%, transparent);
+  }
+  .panel-rail {
+    background: var(--rail);
+    border-right: 1px solid var(--border);
+  }
+  .clip-tag {
+    width: 3px;
+    flex-shrink: 0;
+    align-self: stretch;
+    border-radius: 1px;
+  }
+  .scope-strip {
+    height: 3px;
+    border-radius: 1px;
+    background: linear-gradient(90deg,
+      var(--success) 0%,
+      var(--warning) 60%,
+      var(--destructive) 100%);
+    opacity: 0.85;
   }
 }

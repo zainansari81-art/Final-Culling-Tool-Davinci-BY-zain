@@ -260,34 +260,34 @@ export default function JobPage() {
 
   return (
     <div className="min-h-svh bg-background">
-      <header className="sticky top-0 z-20 border-b border-border/70 bg-background/85 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-6 py-3">
-          <div className="flex items-center gap-3">
-            <Button asChild variant="ghost" size="icon" className="h-8 w-8">
+      <header className="panel-bar sticky top-0 z-20 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-5 py-2">
+          <div className="flex items-center gap-2">
+            <Button asChild variant="ghost" size="icon" className="h-7 w-7">
               <Link to="/" aria-label="Back to home">
-                <ArrowLeft className="h-4 w-4" />
+                <ArrowLeft className="h-3.5 w-3.5" />
               </Link>
             </Button>
-            <div className="flex items-center gap-2">
-              <Clapperboard className="h-4 w-4 text-muted-foreground" />
-              <div className="text-sm font-medium" title={job.folder_path}>
+            <div className="flex items-center gap-2 rounded-md border border-border/70 bg-muted/40 px-2 py-1">
+              <Clapperboard className="h-3.5 w-3.5 text-primary" />
+              <div className="font-mono text-[11px] font-medium" title={job.folder_path}>
                 {folderName}
               </div>
             </div>
             <Separator orientation="vertical" className="h-5" />
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="tabular-nums">{stats.total}</span>
-              <span>clips</span>
-              <span className="text-success">·</span>
-              <span className="tabular-nums text-success">
-                {stats.approved}
+            <div className="flex items-center gap-1.5 font-mono text-[11px]">
+              <span className="rounded-sm bg-muted/60 px-1.5 py-0.5 text-muted-foreground">
+                <span className="tabular-nums text-foreground">{stats.total}</span>
+                <span className="ml-1 uppercase tracking-wider text-[10px]">clips</span>
               </span>
-              <span>approved</span>
-              <span className="text-destructive">·</span>
-              <span className="tabular-nums text-destructive">
-                {stats.rejected}
+              <span className="rounded-sm bg-success/10 px-1.5 py-0.5 text-success">
+                <span className="tabular-nums">{stats.approved}</span>
+                <span className="ml-1 uppercase tracking-wider text-[10px] opacity-80">keep</span>
               </span>
-              <span>rejected</span>
+              <span className="rounded-sm bg-destructive/10 px-1.5 py-0.5 text-destructive">
+                <span className="tabular-nums">{stats.rejected}</span>
+                <span className="ml-1 uppercase tracking-wider text-[10px] opacity-80">cut</span>
+              </span>
               {(() => {
                 if (!job.started_at) return null
                 const end = job.completed_at
@@ -299,19 +299,16 @@ export default function JobPage() {
                 const s = elapsed - m * 60
                 const txt = m > 0 ? `${m}m ${s.toFixed(1)}s` : `${s.toFixed(1)}s`
                 return (
-                  <>
-                    <span>·</span>
-                    <span
-                      className="tabular-nums"
-                      title={
-                        job.completed_at
-                          ? `Total analysis time ${txt}`
-                          : `Running ${txt} so far`
-                      }
-                    >
-                      ⏱ {txt}
-                    </span>
-                  </>
+                  <span
+                    className="rounded-sm bg-muted/60 px-1.5 py-0.5 tabular-nums text-muted-foreground"
+                    title={
+                      job.completed_at
+                        ? `Total analysis time ${txt}`
+                        : `Running ${txt} so far`
+                    }
+                  >
+                    ⏱ {txt}
+                  </span>
                 )
               })()}
             </div>

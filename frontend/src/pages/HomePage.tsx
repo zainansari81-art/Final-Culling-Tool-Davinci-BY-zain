@@ -143,38 +143,56 @@ export default function HomePage() {
 
   return (
     <div className="min-h-svh bg-background">
-      <header className="sticky top-0 z-20 border-b border-border/70 bg-background/85 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-foreground text-background">
-              <Clapperboard className="h-4 w-4" />
+      <header className="panel-bar sticky top-0 z-20 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-2.5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-primary to-[color-mix(in_srgb,var(--primary)_70%,#c2410c)] text-primary-foreground shadow-[0_0_18px_-4px_color-mix(in_srgb,var(--primary)_70%,transparent)]">
+              <Clapperboard className="h-3.5 w-3.5" />
             </div>
-            <div className="text-sm font-medium tracking-tight">
-              Wedding Footage Culler
+            <div className="flex items-baseline gap-2">
+              <span className="text-[13px] font-semibold tracking-tight">Cull</span>
+              <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-muted-foreground">
+                DaVinci Resolve
+              </span>
             </div>
+            <span className="ml-1 rounded-sm border border-border/80 bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+              v1.0
+            </span>
           </div>
-          <Badge
-            variant="secondary"
-            className="gap-1.5 font-normal"
+          <div
+            className="flex items-center gap-2 rounded-md border border-border/70 bg-muted/40 px-2 py-1 font-mono text-[11px]"
             title={aiInfo?.vlm_model ?? undefined}
           >
-            <span className="relative flex h-2 w-2">
+            <span className="relative flex h-1.5 w-1.5">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success/70 opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-success" />
             </span>
-            {aiInfo?.label ?? 'Backend'}
-          </Badge>
+            <span className="uppercase tracking-wider text-muted-foreground">
+              {aiInfo?.backend === 'local' ? 'Local' : aiInfo?.backend === 'cloud' ? 'Cloud' : 'Engine'}
+            </span>
+            <span className="text-foreground">{aiInfo?.label ?? 'Ready'}</span>
+          </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-6 pb-20 pt-10">
-        <div className="grid gap-10 lg:grid-cols-[1fr,300px]">
+      <main className="mx-auto max-w-6xl px-5 pb-20 pt-8">
+        <div className="grid gap-8 lg:grid-cols-[1fr,300px]">
           <section>
-            <div className="mb-8">
-              <h1 className="text-2xl font-semibold tracking-tight">New analysis</h1>
-              <p className="mt-1.5 text-sm text-muted-foreground">
-                Pick a folder, run analysis, then review and export your selects.
-              </p>
+            <div className="mb-7 flex items-end justify-between gap-4 border-b border-border/60 pb-4">
+              <div>
+                <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary/90">
+                  · New session
+                </div>
+                <h1 className="mt-1 text-xl font-semibold tracking-tight">
+                  Ingest &amp; Cull
+                </h1>
+                <p className="mt-1 text-[12px] text-muted-foreground">
+                  Pick a folder, run analysis, send selects to Resolve.
+                </p>
+              </div>
+              <div className="hidden font-mono text-[10px] uppercase tracking-wider text-muted-foreground/70 md:block">
+                ⌘ Pick → Analyze → Review
+              </div>
             </div>
 
             {aiInfo?.backend === 'local' && <LocalWarmupCard />}
