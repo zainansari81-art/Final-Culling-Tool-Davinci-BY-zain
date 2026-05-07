@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Wedding Culling Tool</title>
+    <style>
+      html, body, iframe {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        border: 0;
+        background: #0a0a0a;
+        color: #f5f5f5;
+        font-family: -apple-system, system-ui, sans-serif;
+      }
+      #fallback {
+        display: none;
+        padding: 32px;
+        line-height: 1.5;
+      }
+      #fallback h1 { margin: 0 0 12px; font-size: 18px; }
+      #fallback code {
+        background: #1c1c1c;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <iframe
+      id="app"
+      src="about:blank"
+      allow="clipboard-read; clipboard-write; fullscreen"
+    ></iframe>
+    <div id="fallback">
+      <h1>Backend not reachable</h1>
+      <p>The Wedding Culling Tool backend isn't running on
+      <code>http://127.0.0.1:8000</code> (API) or
+      <code>http://127.0.0.1:5173</code> (Vite dev).</p>
+      <p>Start it from the menu-bar launcher (or
+      <code>bash start.sh</code> in dev), then click Refresh below.</p>
+      <button onclick="location.reload()">Refresh</button>
+    </div>
+    <script>
+      // Pick the right frontend host:
+      //   - Vite dev server on :5173 if it's up (live HMR while developing)
+      //   - otherwise FastAPI on :8000 which serves the built frontend/dist
+      // Falls through to the help panel only when neither responds.
+      (function() {
+        var iframe = document.getElementById('app');
+        var fallback = document.getElementById('fallback');
+        var dev = 'http://127.0.0.1:5173';
+        var prod = 'http://127.0.0.1:8000';
+        function probe(url) {
+          return fetch(url, { mode: 'no-cors', cache: 'no-store' })
+            .then(function() { return true; })
+            .catch(function() { return false; });
+        }
+        probe(dev).then(function(ok) {
+          if (ok) { iframe.src = dev; return; }
+          probe(prod + '/ai/info').then(function(apiOk) {
+            if (apiOk) {
+              iframe.src = prod + '/';
+            } else {
+              iframe.style.display = 'none';
+              fallback.style.display = 'block';
+            }
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

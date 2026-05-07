@@ -1010,3 +1010,20 @@ def stream_clip(job_id: str, clip_id: str, request: Request):
         media_type=media_type,
         headers={"Accept-Ranges": "bytes"},
     )
+
+
+# ─────────────────────────── Frontend statics ───────────────────────────────
+# When the frontend has been built (Vite `npm run build` → frontend/dist), the
+# backend serves it at /. Lets the PyInstaller bundle ship a single port — no
+# Vite process needed in production. In dev mode (start.sh runs Vite on
+# 5173) frontend/dist may not exist; this mount is a no-op then.
+
+_FRONTEND_DIST = (Path(__file__).resolve().parent.parent / "frontend" / "dist")
+if _FRONTEND_DIST.is_dir() and (_FRONTEND_DIST / "index.html").exists():
+    from fastapi.staticfiles import StaticFiles
+    app.mount(
+        "/",
+        StaticFiles(directory=str(_FRONTEND_DIST), html=True),
+        name="frontend",
+    )
+    logger.info("Serving built frontend from %s", _FRONTEND_DIST)
