@@ -17,6 +17,7 @@ import type { AnalysisJob } from '../types'
 import BackendError from '../components/BackendError'
 import FolderBrowser from '../components/FolderBrowser'
 import LocalWarmupCard from '../components/LocalWarmupCard'
+import OnboardingWizard from '../components/OnboardingWizard'
 import LogPane from '../components/LogPane'
 import {
   HudFrame,
@@ -167,6 +168,16 @@ export default function HomePage() {
         {aiInfo?.backend === 'local' && (
           <div className="mb-4">
             <LocalWarmupCard />
+          </div>
+        )}
+
+        {aiInfo?.backend === 'cloud' && !aiInfo.has_key && (
+          <div className="mb-4">
+            <OnboardingWizard
+              onDone={() => {
+                api.aiInfo().then(setAiInfo).catch(() => {})
+              }}
+            />
           </div>
         )}
 

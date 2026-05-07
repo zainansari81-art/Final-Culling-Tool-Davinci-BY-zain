@@ -103,10 +103,21 @@ export interface SequenceResponse {
 }
 
 export interface AiInfo {
-  backend: 'vertex' | 'local'
+  backend: 'vertex' | 'local' | 'cloud'
   label: string
   vlm_model: string | null
   clip_model: string | null
+  has_key: boolean
+}
+
+export interface OnboardingStatus {
+  provider: 'gemini'
+  has_key: boolean
+}
+
+export interface OnboardingTestResult {
+  ok: boolean
+  error?: string
 }
 
 export interface LocalModelStatus {
@@ -122,6 +133,18 @@ export interface LocalModelStatus {
 export const api = {
   aiInfo: (): Promise<AiInfo> =>
     client.get('/ai/info').then((r) => r.data),
+
+  onboardingStatus: (): Promise<OnboardingStatus> =>
+    client.get('/onboarding/status').then((r) => r.data),
+
+  onboardingTest: (apiKey: string): Promise<OnboardingTestResult> =>
+    client.post('/onboarding/test', { api_key: apiKey }).then((r) => r.data),
+
+  onboardingSave: (apiKey: string): Promise<{ ok: boolean; provider: string }> =>
+    client.post('/onboarding/save', { api_key: apiKey }).then((r) => r.data),
+
+  onboardingDelete: (): Promise<{ removed: boolean }> =>
+    client.delete('/onboarding/key').then((r) => r.data),
 
   localStatus: (): Promise<LocalModelStatus> =>
     client.get('/ai/local/status').then((r) => r.data),
