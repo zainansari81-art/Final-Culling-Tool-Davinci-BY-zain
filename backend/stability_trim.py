@@ -99,6 +99,30 @@ def _longest_keep_run(states: List[str]) -> tuple[int, int]:
     return best
 
 
+def enumerate_keep_runs(
+    states: List[str],
+    interval_sec: float,
+    min_keep_sec: float = MIN_KEEP_SEC,
+) -> List[tuple[float, float]]:
+    """All STABLE/SMOOTH runs of at least min_keep_sec, as (in_sec, out_sec) pairs."""
+    runs: List[tuple[float, float]] = []
+    cur_start: Optional[int] = None
+    for i, s in enumerate(states):
+        keep = s in ("STABLE", "SMOOTH")
+        if keep and cur_start is None:
+            cur_start = i
+        elif not keep and cur_start is not None:
+            length_sec = (i - cur_start) * interval_sec
+            if length_sec >= min_keep_sec:
+                runs.append((cur_start * interval_sec, i * interval_sec))
+            cur_start = None
+    if cur_start is not None:
+        length_sec = (len(states) - cur_start) * interval_sec
+        if length_sec >= min_keep_sec:
+            runs.append((cur_start * interval_sec, len(states) * interval_sec))
+    return runs
+
+
 def compute_stability_trim(
     frames: List[np.ndarray],
     duration_sec: float,

@@ -544,6 +544,56 @@ def _run_ai_pipeline(
                 "%s flagged Needs Stabilization (longest steady run %.1fs, %d motion samples)",
                 fname, stab.longest_stable_sec, len(dense.motion),
             )
+        # ─── Archetype-aware trim refinement (Phase 1c) ──────────────────
+        # Stability picked the longest steady run; this picks the steady
+        # run that best matches the AI segment's signature (audio peak
+        # for First Look, speech density for Ceremony/Toasts, etc.).
+        if (
+            not stab.needs_stabilization
+            and dense is not None
+            and scores.ai_segment
+        ):
+            try:
+                import archetypes
+                states = stab.states
+                runs = stability_trim.enumerate_keep_runs(
+                    states,
+                    interval_sec=1.0 / dense.sample_hz,
+                )
+                if runs:
+                    word_dicts = [
+                        {
+                            "word": w.word,
+                            "start_sec": w.start_sec,
+                            "end_sec": w.end_sec,
+                            "speaker_tag": w.speaker_tag,
+                        }
+                        for w in scores.words
+                    ]
+                    signal = archetypes.DenseSignal(
+                        motion=dense.motion,
+                        audio_rms=dense.audio_rms,
+                        words=word_dicts,
+                        duration_sec=dense.duration_sec,
+                        sample_hz=dense.sample_hz,
+                    )
+                    refined = archetypes.refine_trim(
+                        segment=scores.ai_segment,
+                        candidate_windows=runs,
+                        signal=signal,
+                    )
+                    if refined is not None:
+                        new_in, new_out, score = refined
+                        if (new_in, new_out) != (stab.in_sec, stab.out_sec):
+                            logger.info(
+                                "Archetype refine [%s] %s: %.2fs–%.2fs → %.2fs–%.2fs (score=%.3f)",
+                                scores.ai_segment, fname,
+                                stab.in_sec, stab.out_sec, new_in, new_out, score,
+                            )
+                            scores.ai_in_sec = new_in
+                            scores.ai_out_sec = new_out
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Archetype refine failed for %s: %s", fname, exc)
         # Persist dense features as a sidecar so archetype scorers can
         # consume them later without re-decoding the video. Pin to an
         # absolute path next to this module so the location is stable
