@@ -449,6 +449,8 @@ def update_clip(
 
     if body.approved is not None:
         clip.approved = body.approved
+    if body.near_miss is not None:
+        clip.near_miss = body.near_miss
     if body.segment_label is not None:
         clip.segment_label = body.segment_label
     if body.sequence_position is not None:

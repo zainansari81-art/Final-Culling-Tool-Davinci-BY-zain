@@ -50,9 +50,22 @@ export default function ClipCard({
   }
 
   const handleApprove = () =>
-    patch({ approved: clip.approved === true ? null : true })
+    patch({
+      approved: clip.approved === true ? null : true,
+      near_miss: false,
+    })
   const handleReject = () =>
-    patch({ approved: clip.approved === false ? null : false })
+    patch({
+      approved: clip.approved === false ? null : false,
+      near_miss: false,
+    })
+  const handleNearMiss = () =>
+    patch({
+      near_miss: !clip.near_miss,
+      // Clear approve/reject when toggling near_miss on, so it's a real
+      // third state for dataset bootstrap (KEEP / NEAR_MISS / REJECT).
+      approved: clip.near_miss ? clip.approved : null,
+    })
   const handleSegment = (e: React.ChangeEvent<HTMLSelectElement>) =>
     patch({ suggested_segment: e.target.value })
 
@@ -70,6 +83,10 @@ export default function ClipCard({
       if (e.key === 'r' || e.key === 'R') {
         e.preventDefault()
         handleReject()
+      }
+      if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault()
+        handleNearMiss()
       }
       const num = parseInt(e.key)
       if (!isNaN(num) && num >= 1 && num <= SEGMENTS.length) {
@@ -299,6 +316,22 @@ export default function ClipCard({
           >
             <Check className="h-3.5 w-3.5" />
             Approve
+          </Button>
+          <Button
+            size="sm"
+            variant={clip.near_miss ? 'default' : 'outline'}
+            className={cn(
+              'h-7 flex-1 px-2 text-xs',
+              clip.near_miss &&
+                'bg-warning text-background hover:bg-warning/90',
+            )}
+            title="Near miss — almost good. Used for training the model later."
+            onClick={(e) => {
+              e.stopPropagation()
+              handleNearMiss()
+            }}
+          >
+            ≈ Near
           </Button>
           <Button
             size="sm"

@@ -13,6 +13,7 @@ export interface ClipResult {
   duplicate_of: string | null
   suggested_segment: string
   approved: boolean | null
+  near_miss: boolean
   reject_reason: string | null
   // AI-derived
   ai_caption?: string | null
@@ -52,6 +53,7 @@ export interface CreateJobRequest {
 
 export interface UpdateClipRequest {
   approved?: boolean | null
+  near_miss?: boolean | null
   suggested_segment?: string
   reject_reason?: string | null
   sequence_position?: number

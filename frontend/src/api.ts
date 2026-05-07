@@ -25,6 +25,7 @@ function toClipResult(raw: any): ClipResult {
     duplicate_of: scores.duplicate_of ?? null,
     suggested_segment: raw.segment_label ?? raw.suggested_segment ?? 'Backup',
     approved: raw.approved ?? null,
+    near_miss: raw.near_miss ?? false,
     reject_reason: null,
     ai_caption: scores.ai_caption ?? null,
     ai_moment: scores.ai_moment ?? null,
@@ -152,6 +153,7 @@ export const api = {
     client
       .patch(`/jobs/${jobId}/clips/${clipId}`, {
         approved: patch.approved,
+        near_miss: patch.near_miss,
         segment_label: patch.suggested_segment,
         sequence_position: patch.sequence_position,
         ai_in_sec: patch.ai_in_sec,

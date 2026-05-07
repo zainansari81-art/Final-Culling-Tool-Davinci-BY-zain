@@ -85,6 +85,7 @@ class ClipReview(BaseModel):
     scores: ClipScore
     suggested_segment: str = "Backup"   # machine suggestion
     approved: bool = False
+    near_miss: bool = False             # KEEP/NEAR_MISS/REJECT label channel for dataset bootstrap
     segment_label: str = "Backup"       # human-confirmed label
 
 
@@ -127,6 +128,7 @@ class FsListResponse(BaseModel):
 class UpdateClipRequest(BaseModel):
     """PATCH body for /jobs/{job_id}/clips/{clip_id}."""
     approved: Optional[bool] = None
+    near_miss: Optional[bool] = None
     segment_label: Optional[str] = None
     sequence_position: Optional[int] = None
     ai_in_sec: Optional[float] = None

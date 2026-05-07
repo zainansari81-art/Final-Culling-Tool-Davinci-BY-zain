@@ -31,6 +31,7 @@ type FilterTab =
   | 'all'
   | 'unreviewed'
   | 'approved'
+  | 'near_miss'
   | 'rejected'
   | 'shaky'
   | 'blurry'
@@ -40,6 +41,7 @@ const FILTER_TABS: { key: FilterTab; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'unreviewed', label: 'Unreviewed' },
   { key: 'approved', label: 'Approved' },
+  { key: 'near_miss', label: 'Near miss' },
   { key: 'rejected', label: 'Rejected' },
   { key: 'shaky', label: 'Shaky' },
   { key: 'blurry', label: 'Blurry' },
@@ -133,8 +135,9 @@ export default function JobPage() {
   const tabCounts = useMemo(
     (): Record<FilterTab, number> => ({
       all: clips.length,
-      unreviewed: clips.filter((c) => c.approved === null).length,
+      unreviewed: clips.filter((c) => c.approved === null && !c.near_miss).length,
       approved: clips.filter((c) => c.approved === true).length,
+      near_miss: clips.filter((c) => c.near_miss).length,
       rejected: clips.filter((c) => c.approved === false).length,
       shaky: clips.filter(isShakyVisible).length,
       blurry: clips.filter(isBlurryVisible).length,
@@ -156,10 +159,13 @@ export default function JobPage() {
     let list = clips
     switch (activeFilter) {
       case 'unreviewed':
-        list = list.filter((c) => c.approved === null)
+        list = list.filter((c) => c.approved === null && !c.near_miss)
         break
       case 'approved':
         list = list.filter((c) => c.approved === true)
+        break
+      case 'near_miss':
+        list = list.filter((c) => c.near_miss)
         break
       case 'rejected':
         list = list.filter((c) => c.approved === false)
@@ -436,6 +442,10 @@ export default function JobPage() {
                 R
               </kbd>{' '}
               reject ·{' '}
+              <kbd className="rounded border border-border bg-muted px-1 py-0.5 text-[10px]">
+                N
+              </kbd>{' '}
+              near miss ·{' '}
               <kbd className="rounded border border-border bg-muted px-1 py-0.5 text-[10px]">
                 1–9
               </kbd>{' '}
