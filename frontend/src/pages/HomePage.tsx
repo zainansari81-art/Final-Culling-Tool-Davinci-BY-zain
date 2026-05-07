@@ -9,7 +9,6 @@ import {
   Plus,
   Search,
   Settings as SettingsIcon,
-  Wand2,
 } from 'lucide-react'
 import { api, type AiInfo } from '../api'
 import type { AnalysisJob } from '../types'
@@ -18,7 +17,6 @@ import FolderBrowser from '../components/FolderBrowser'
 import LocalWarmupCard from '../components/LocalWarmupCard'
 import OnboardingWizard from '../components/OnboardingWizard'
 import Shell from '../components/Shell'
-import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -55,7 +53,8 @@ export default function HomePage() {
   const [includedFiles, setIncludedFiles] = useState<string[] | null>(null)
   const [selectedCount, setSelectedCount] = useState(0)
   const [activeJob, setActiveJob] = useState<AnalysisJob | null>(null)
-  const [enableAi, setEnableAi] = useState(false)
+  // AI is always on; kept as a const so existing API call shape stays.
+  const enableAi = true
   const [aiInfo, setAiInfo] = useState<AiInfo | null>(null)
   const [newSessionOpen, setNewSessionOpen] = useState(false)
 
@@ -344,26 +343,6 @@ export default function HomePage() {
           </div>
 
           <div className="border-t border-border bg-card">
-            <label className="flex cursor-pointer items-start gap-3 border-b border-border px-4 py-3 transition-colors hover:bg-accent/40">
-              <Switch
-                checked={enableAi}
-                onCheckedChange={setEnableAi}
-                disabled={submitting}
-                className="mt-0.5"
-              />
-              <div className="flex-1">
-                <div className="flex items-center gap-1.5 text-[12.5px] font-medium">
-                  <Wand2 className="h-3.5 w-3.5 text-[var(--primary)]" />
-                  Use AI analysis
-                </div>
-                <p className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground">
-                  {aiInfo?.backend === 'local'
-                    ? 'Runs locally. Adds captions, segments, quality scores.'
-                    : 'Uses Vertex Gemini (~30s/clip). Adds captions, segments, quality, trim suggestions.'}
-                </p>
-              </div>
-            </label>
-
             <div className="flex items-center justify-between gap-3 px-4 py-3">
               <div className="text-[12px] text-muted-foreground">
                 {selectedCount > 0 ? (
@@ -371,8 +350,7 @@ export default function HomePage() {
                     <span className="font-medium tabular-nums text-foreground">
                       {selectedCount}
                     </span>{' '}
-                    clip{selectedCount === 1 ? '' : 's'} selected
-                    {enableAi ? ' · AI on' : ''}
+                    clip{selectedCount === 1 ? '' : 's'} selected · AI on
                   </>
                 ) : (
                   'Select at least one clip to continue.'

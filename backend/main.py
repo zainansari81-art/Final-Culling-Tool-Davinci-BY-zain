@@ -91,30 +91,20 @@ def _run_job(
     job_id: str,
     folder_path: str,
     included_files: List[str] | None,
-    enable_ai: bool = False,
+    enable_ai: bool = True,  # kept for back-compat; AI is always on now
 ) -> None:
-    """Wrapper that attaches a per-job log handler before running analysis."""
+    """Wrapper that attaches a per-job log handler before running analysis.
+    AI runs unconditionally — analyzer._ai_enabled returns True always."""
     handler = JobLogHandler(job_id)
     handler.setLevel(logging.INFO)
     analyzer_logger = logging.getLogger("analyzer")
     analyzer_logger.addHandler(handler)
     job_logs[job_id].append(
         f"{datetime.now().strftime('%H:%M:%S')} I Job started for {folder_path}"
-        f"{' (AI on)' if enable_ai else ''}"
     )
-    # Set ENABLE_AI for this thread tree via env so analyzer.py picks it up.
-    import os as _os
-    prev = _os.environ.get("ENABLE_AI")
-    if enable_ai:
-        _os.environ["ENABLE_AI"] = "1"
     try:
         analyze_folder(job_id, folder_path, jobs, included_files)
     finally:
-        if enable_ai:
-            if prev is None:
-                _os.environ.pop("ENABLE_AI", None)
-            else:
-                _os.environ["ENABLE_AI"] = prev
         analyzer_logger.removeHandler(handler)
         job_logs[job_id].append(
             f"{datetime.now().strftime('%H:%M:%S')} I Job finished"

@@ -35,8 +35,9 @@ from models import (
 
 
 def _ai_enabled() -> bool:
-    """Read at call time so env changes after import are honored."""
-    return os.environ.get("ENABLE_AI", "0") == "1"
+    """AI is always on now — kept as a function so future opt-out can
+    flip the rule without touching every call site."""
+    return True
 
 logger = logging.getLogger(__name__)
 

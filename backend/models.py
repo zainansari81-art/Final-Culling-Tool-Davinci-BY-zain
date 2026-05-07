@@ -112,7 +112,7 @@ class AnalysisJob(BaseModel):
 class CreateJobRequest(BaseModel):
     folder_path: str
     included_files: Optional[List[str]] = None  # absolute paths; if set, only these are analyzed
-    enable_ai: bool = False  # opt-in Vertex AI pipeline (Video Intel + Gemini)
+    enable_ai: bool = True  # AI always on; field kept for back-compat
 
 
 class FsEntry(BaseModel):
