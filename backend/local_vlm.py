@@ -249,10 +249,13 @@ def synthesize(
     if clip_seg and isinstance(clip_seg.get("ranked"), list) and len(clip_seg["ranked"]) >= 2:
         top_seg, top_score = clip_seg["ranked"][0]
         _, runner_score = clip_seg["ranked"][1]
-        if (top_score - runner_score) >= CLIP_SEGMENT_MARGIN and top_seg != initial.get("segment"):
+        effective_margin = (
+            0.0 if initial.get("segment") == "Backup" else CLIP_SEGMENT_MARGIN
+        )
+        if (top_score - runner_score) >= effective_margin and top_seg != initial.get("segment"):
             logger.info(
-                "local_vlm: CLIP override segment %r → %r (score=%.3f, margin=%.3f)",
-                initial.get("segment"), top_seg, top_score, top_score - runner_score,
+                "local_vlm: CLIP override segment %r → %r (score=%.3f, margin=%.3f, effective=%.3f)",
+                initial.get("segment"), top_seg, top_score, top_score - runner_score, effective_margin,
             )
             initial["segment"] = top_seg
 
@@ -377,7 +380,7 @@ def _heuristic_decision(
     return {
         "segment": "Backup" if not has_speech else "Toasts",
         "moment": None,
-        "caption": (transcript[:120] or None),
+        "caption": (transcript[:120] if transcript else "Heuristic fallback — no AI caption available."),
         "quality": round(q, 2),
         "subjects": [],
         "skip": skip,

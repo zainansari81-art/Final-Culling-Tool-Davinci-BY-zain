@@ -211,40 +211,53 @@ export default function ClipCard({
           </p>
         )}
 
-        {(clip.dialogue_trimmed || (clip.word_count ?? 0) > 0 || clip.sequence_position != null) && (
-          <div className="flex flex-wrap items-center gap-1">
-            {(clip.word_count ?? 0) > 0 && (
-              <Badge
-                variant="outline"
-                className="h-4 gap-1 px-1 text-[10px] font-normal"
-                title={`${clip.word_count} transcribed words`}
-              >
-                <Mic className="h-2.5 w-2.5" />
-                {clip.word_count}w
-              </Badge>
-            )}
-            {clip.dialogue_trimmed && clip.ai_in_sec != null && clip.ai_out_sec != null && (
-              <Badge
-                variant="outline"
-                className="h-4 gap-1 px-1 text-[10px] font-normal text-success"
-                title={`Trimmed to dialogue: ${clip.ai_in_sec.toFixed(1)}s – ${clip.ai_out_sec.toFixed(1)}s`}
-              >
-                <Scissors className="h-2.5 w-2.5" />
-                trim
-              </Badge>
-            )}
-            {clip.sequence_position != null && (
-              <Badge
-                variant="outline"
-                className="h-4 gap-1 px-1 text-[10px] font-normal"
-                title={`Timeline position #${clip.sequence_position}`}
-              >
-                <MoveVertical className="h-2.5 w-2.5" />
-                #{clip.sequence_position}
-              </Badge>
-            )}
-          </div>
-        )}
+        {(() => {
+          const hasTrim =
+            clip.ai_in_sec != null &&
+            clip.ai_out_sec != null &&
+            clip.ai_out_sec - clip.ai_in_sec < clip.duration_sec - 0.4
+          const showRow =
+            hasTrim || (clip.word_count ?? 0) > 0 || clip.sequence_position != null
+          if (!showRow) return null
+          return (
+            <div className="flex flex-wrap items-center gap-1">
+              {(clip.word_count ?? 0) > 0 && (
+                <Badge
+                  variant="outline"
+                  className="h-4 gap-1 px-1 text-[10px] font-normal"
+                  title={`${clip.word_count} transcribed words`}
+                >
+                  <Mic className="h-2.5 w-2.5" />
+                  {clip.word_count}w
+                </Badge>
+              )}
+              {hasTrim && (
+                <Badge
+                  variant="outline"
+                  className="h-4 gap-1 px-1 text-[10px] font-normal text-success"
+                  title={
+                    clip.dialogue_trimmed
+                      ? `Dialogue trim: ${clip.ai_in_sec!.toFixed(1)}s – ${clip.ai_out_sec!.toFixed(1)}s`
+                      : `Stability trim: ${clip.ai_in_sec!.toFixed(1)}s – ${clip.ai_out_sec!.toFixed(1)}s`
+                  }
+                >
+                  <Scissors className="h-2.5 w-2.5" />
+                  {`${clip.ai_in_sec!.toFixed(1)}–${clip.ai_out_sec!.toFixed(1)}s`}
+                </Badge>
+              )}
+              {clip.sequence_position != null && (
+                <Badge
+                  variant="outline"
+                  className="h-4 gap-1 px-1 text-[10px] font-normal"
+                  title={`Timeline position #${clip.sequence_position}`}
+                >
+                  <MoveVertical className="h-2.5 w-2.5" />
+                  #{clip.sequence_position}
+                </Badge>
+              )}
+            </div>
+          )
+        })()}
 
         <select
           className="h-7 rounded-md border border-border bg-input px-2 text-xs outline-none transition-colors focus:border-ring"
