@@ -1,204 +1,200 @@
-"""CullingTool — DaVinci Resolve Workspace > Scripts entry point.
+"""CullingTool — DaVinci Resolve Workspace > Scripts > Edit > CullingTool
 
-Install:
-    macOS:   ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Edit/
-    Windows: %APPDATA%/Blackmagic Design/DaVinci Resolve/Support/Fusion/Scripts/Edit/
-    Linux:   ~/.local/share/DaVinciResolve/Fusion/Scripts/Edit/
+Single-click launcher: spawns the backend if not running, then opens the
+React UI in the user's default browser. The backend is detached so it
+keeps serving when Resolve quits.
 
-Run:
-    DaVinci Resolve → Workspace → Scripts → Edit → CullingTool
+Install via:
+    python3 plugin/install.py
 
-Talks to the Wedding Culling Tool backend at http://127.0.0.1:8000. Backend
-must already be running (start.sh). Free-tier Resolve also needs
-Preferences > System > General > External scripting using = Local.
+Stdlib only — runs in Resolve's bundled Python.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import platform
+import subprocess
 import sys
+import time
 import tkinter as tk
 import urllib.error
 import urllib.request
-from tkinter import messagebox, ttk
-from typing import Any, Dict, List, Optional
+import webbrowser
+from pathlib import Path
+from tkinter import messagebox
+from typing import List, Optional
 
-BACKEND = "http://127.0.0.1:8000"
-TIMEOUT_SEC = 8
+BACKEND_HOST = "127.0.0.1"
+BACKEND_PORT = 8000
+BACKEND_URL = f"http://{BACKEND_HOST}:{BACKEND_PORT}"
+HEALTH_PATH = "/ai/info"
+HEALTH_TIMEOUT_S = 1.5
+SPAWN_WAIT_S = 30
+
+CACHE_DIR = Path.home() / ".cache" / "wedding-culling-tool"
+REPO_HINT_FILE = CACHE_DIR / "repo_root.txt"
+BACKEND_LOG = CACHE_DIR / "backend.log"
 
 
-# ─────────────────────────── HTTP helpers (stdlib only) ─────────────────────
+# ─────────────────────────── Probes ─────────────────────────────────────────
 
-def _http_get(path: str) -> Any:
-    req = urllib.request.Request(BACKEND + path, method="GET")
-    with urllib.request.urlopen(req, timeout=TIMEOUT_SEC) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+def _backend_up() -> bool:
+    try:
+        with urllib.request.urlopen(BACKEND_URL + HEALTH_PATH, timeout=HEALTH_TIMEOUT_S):
+            return True
+    except Exception:  # noqa: BLE001
+        return False
 
 
-def _http_post(path: str, body: Dict[str, Any]) -> Any:
-    data = json.dumps(body).encode("utf-8")
-    req = urllib.request.Request(
-        BACKEND + path,
-        data=data,
-        method="POST",
-        headers={"Content-Type": "application/json"},
+# ─────────────────────────── Repo discovery ─────────────────────────────────
+
+def _candidate_repo_roots() -> List[Path]:
+    cands: List[Path] = []
+    env_root = os.environ.get("CULL_REPO_ROOT")
+    if env_root:
+        cands.append(Path(env_root))
+    if REPO_HINT_FILE.exists():
+        try:
+            txt = REPO_HINT_FILE.read_text().strip()
+            if txt:
+                cands.append(Path(txt))
+        except Exception:  # noqa: BLE001
+            pass
+    # Three levels up from this script's install location (best effort).
+    here = Path(__file__).resolve().parent
+    cands.append(here.parent.parent.parent)
+    # Dev fallback.
+    cands.append(Path("/Users/Shared/Final-Culling-Tool-Davinci-BY-zain"))
+    return cands
+
+
+def _find_repo_root() -> Optional[Path]:
+    for c in _candidate_repo_roots():
+        if (c / "backend" / "main.py").exists() or (
+            c / "installer" / "run_backend.py"
+        ).exists():
+            return c
+    return None
+
+
+# ─────────────────────────── Backend spawn ──────────────────────────────────
+
+def _resolve_backend_cmd(repo: Path) -> Optional[List[str]]:
+    bundled_unix = repo / "installer" / "culling-backend" / "culling-backend"
+    bundled_win = repo / "installer" / "culling-backend" / "culling-backend.exe"
+    if platform.system() == "Windows" and bundled_win.exists():
+        return [str(bundled_win)]
+    if bundled_unix.exists():
+        return [str(bundled_unix)]
+    venv_py_unix = repo / "backend" / "venv" / "bin" / "python"
+    venv_py_win = repo / "backend" / "venv" / "Scripts" / "python.exe"
+    run_backend = repo / "installer" / "run_backend.py"
+    if not run_backend.exists():
+        return None
+    if platform.system() == "Windows" and venv_py_win.exists():
+        return [str(venv_py_win), str(run_backend)]
+    if venv_py_unix.exists():
+        return [str(venv_py_unix), str(run_backend)]
+    return ["python3", str(run_backend)]
+
+
+def _spawn_detached(cmd: List[str], cwd: Path) -> None:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    log_f = open(BACKEND_LOG, "a", buffering=1)  # line-buffered
+    log_f.write(
+        f"\n--- spawn {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n"
+        f"cmd: {cmd}\ncwd: {cwd}\n"
     )
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    env = os.environ.copy()
+    env.setdefault("AI_BACKEND", "cloud")
+    env["CULL_HOST"] = BACKEND_HOST
+    env["CULL_PORT"] = str(BACKEND_PORT)
+    if platform.system() == "Windows":
+        DETACHED_PROCESS = 0x00000008
+        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        subprocess.Popen(
+            cmd,
+            cwd=str(cwd),
+            env=env,
+            stdout=log_f,
+            stderr=log_f,
+            stdin=subprocess.DEVNULL,
+            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+            close_fds=True,
+        )
+    else:
+        subprocess.Popen(
+            cmd,
+            cwd=str(cwd),
+            env=env,
+            stdout=log_f,
+            stderr=log_f,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+            close_fds=True,
+        )
 
 
-# ─────────────────────────── Tk dialogs ─────────────────────────────────────
+# ─────────────────────────── Tk error dialog ────────────────────────────────
 
-def _root_window() -> tk.Tk:
+def _err_dialog(msg: str) -> None:
     root = tk.Tk()
     root.withdraw()
     root.attributes("-topmost", True)
-    return root
-
-
-def _err(msg: str) -> None:
-    root = _root_window()
     messagebox.showerror("CullingTool", msg)
     root.destroy()
 
 
-def _info(title: str, msg: str) -> None:
-    root = _root_window()
-    messagebox.showinfo(title, msg)
-    root.destroy()
-
-
-def _confirm_push_dialog(job: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Returns {include_near_miss, include_rejected, mode} or None on cancel."""
-    clips = job.get("clips", [])
-    approved = sum(1 for c in clips if c.get("approved") is True)
-    near_miss = sum(1 for c in clips if c.get("near_miss"))
-    rejected = sum(1 for c in clips if c.get("approved") is False)
-    folder = (job.get("folder_path") or "").rstrip("/").split("/")[-1] or "(folder)"
-
-    root = tk.Tk()
-    root.title("CullingTool — Push to Resolve")
-    root.attributes("-topmost", True)
-    root.geometry("420x260")
-
-    pad = {"padx": 16, "pady": 6}
-
-    ttk.Label(
-        root,
-        text=f"Push  {folder}  to current Resolve project?",
-        font=("Helvetica", 13, "bold"),
-    ).pack(anchor="w", **pad)
-
-    ttk.Label(
-        root,
-        text=(
-            f"approved {approved}    near-miss {near_miss}    rejected {rejected}"
-        ),
-        foreground="#666",
-    ).pack(anchor="w", **pad)
-
-    near_var = tk.IntVar(value=1)
-    reject_var = tk.IntVar(value=0)
-    new_tl_var = tk.IntVar(value=1)
-
-    ttk.Checkbutton(
-        root, text=f"Include near-miss clips ({near_miss})", variable=near_var
-    ).pack(anchor="w", **pad)
-    ttk.Checkbutton(
-        root, text=f"Include rejected clips ({rejected})", variable=reject_var
-    ).pack(anchor="w", **pad)
-    ttk.Checkbutton(
-        root,
-        text="Create new timeline (off = append to active timeline)",
-        variable=new_tl_var,
-    ).pack(anchor="w", **pad)
-
-    chosen: Dict[str, Any] = {}
-
-    def _on_push() -> None:
-        chosen.update({
-            "include_near_miss": bool(near_var.get()),
-            "include_rejected": bool(reject_var.get()),
-            "mode": "new_timeline" if new_tl_var.get() else "append",
-        })
-        root.destroy()
-
-    def _on_cancel() -> None:
-        root.destroy()
-
-    btn_row = ttk.Frame(root)
-    btn_row.pack(fill="x", side="bottom", padx=16, pady=12)
-    ttk.Button(btn_row, text="Cancel", command=_on_cancel).pack(side="right")
-    ttk.Button(btn_row, text="Push", command=_on_push).pack(side="right", padx=6)
-
-    root.mainloop()
-    return chosen if chosen else None
-
-
 # ─────────────────────────── Main ───────────────────────────────────────────
 
-def _pick_latest_done_job() -> Optional[Dict[str, Any]]:
-    try:
-        jobs: List[Dict[str, Any]] = _http_get("/jobs")
-    except Exception as exc:  # noqa: BLE001
-        _err(
-            "Couldn't reach the Wedding Culling backend.\n\n"
-            "Start the backend first:\n  bash start.sh\n\n"
-            f"({type(exc).__name__}: {exc})"
-        )
-        return None
-    done = [j for j in jobs if j.get("status") == "done"]
-    if not done:
-        _info(
-            "CullingTool",
-            "No completed jobs yet.\n\nOpen the browser tool, run an analysis "
-            "to completion, then re-run this script.",
-        )
-        return None
-    # /jobs returns newest first per the backend route, but resort defensively.
-    done.sort(key=lambda j: j.get("created_at") or "", reverse=True)
-    return done[0]
-
-
 def main() -> int:
-    job = _pick_latest_done_job()
-    if not job:
+    if _backend_up():
+        webbrowser.open(BACKEND_URL + "/")
+        return 0
+
+    repo = _find_repo_root()
+    if repo is None:
+        _err_dialog(
+            "Wedding Culling Tool isn't installed in a place I can find.\n\n"
+            "Set CULL_REPO_ROOT to your repo path, or write the path to:\n"
+            f"{REPO_HINT_FILE}\n\n"
+            "Then re-run Workspace > Scripts > Edit > CullingTool."
+        )
         return 1
-    chosen = _confirm_push_dialog(job)
-    if not chosen:
-        return 0  # user cancelled
-    job_id = job["id"]
+
+    cmd = _resolve_backend_cmd(repo)
+    if cmd is None:
+        _err_dialog(
+            f"Found the repo at:\n  {repo}\n\n"
+            "But couldn't locate either the bundled binary at\n"
+            "installer/culling-backend/culling-backend or the dev launcher\n"
+            "installer/run_backend.py. Reinstall the tool."
+        )
+        return 1
+
     try:
-        result = _http_post(f"/jobs/{job_id}/resolve/push", chosen)
-    except urllib.error.HTTPError as exc:
-        try:
-            payload = json.loads(exc.read().decode("utf-8"))
-            detail = payload.get("detail") or str(exc)
-        except Exception:  # noqa: BLE001
-            detail = str(exc)
-        _err(f"Backend rejected push:\n\n{detail}")
-        return 2
+        _spawn_detached(cmd, cwd=repo)
     except Exception as exc:  # noqa: BLE001
-        _err(f"Push failed:\n\n{type(exc).__name__}: {exc}")
-        return 2
+        _err_dialog(f"Couldn't spawn the backend:\n\n{type(exc).__name__}: {exc}")
+        return 1
 
-    if not result.get("ok"):
-        _err(result.get("error") or "Push reported failure (no detail).")
-        return 2
+    deadline = time.monotonic() + SPAWN_WAIT_S
+    while time.monotonic() < deadline:
+        if _backend_up():
+            webbrowser.open(BACKEND_URL + "/")
+            return 0
+        time.sleep(0.7)
 
-    msg = (
-        f"Added {result.get('clips_added', 0)} clips to timeline "
-        f"'{result.get('timeline_name')}' in project "
-        f"'{result.get('project_name')}'.\n\n"
-        f"Skipped {result.get('clips_skipped', 0)} clips."
+    _err_dialog(
+        "Backend failed to start within 30 s.\n\n"
+        f"Check the log at:\n  {BACKEND_LOG}\n\n"
+        "Common causes: another process on port 8000, missing venv, broken "
+        "credentials in keychain. Run `bash start.sh` once in a terminal to "
+        "see the real error."
     )
-    errs = result.get("errors") or []
-    if errs:
-        msg += "\n\nErrors:\n  " + "\n  ".join(errs[:10])
-        if len(errs) > 10:
-            msg += f"\n  ... and {len(errs) - 10} more"
-    _info("CullingTool — done", msg)
-    return 0
+    return 1
 
 
 if __name__ == "__main__":

@@ -201,6 +201,26 @@ export const api = {
   exportResolve: (jobId: string, projectName: string): Promise<void> =>
     client.post(`/jobs/${jobId}/export/resolve`, { project_name: projectName }).then(() => undefined),
 
+  resolvePush: (
+    jobId: string,
+    opts: { mode?: 'new_timeline' | 'append'; include_near_miss?: boolean; include_rejected?: boolean } = {},
+  ): Promise<{
+    ok: boolean
+    project_name?: string
+    timeline_name?: string
+    clips_added?: number
+    clips_skipped?: number
+    errors?: string[]
+    error?: string
+  }> =>
+    client
+      .post(`/jobs/${jobId}/resolve/push`, {
+        mode: opts.mode ?? 'new_timeline',
+        include_near_miss: opts.include_near_miss ?? true,
+        include_rejected: opts.include_rejected ?? false,
+      })
+      .then((r) => r.data),
+
   exportFcpxml: (jobId: string, outputPath: string): Promise<void> =>
     client.post(`/jobs/${jobId}/export/fcpxml`, { output_path: outputPath }).then(() => undefined),
 

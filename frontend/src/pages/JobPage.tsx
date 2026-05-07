@@ -60,6 +60,10 @@ export default function JobPage() {
   const [approveAllState, setApproveAllState] = useState<
     'idle' | 'loading' | 'done'
   >('idle')
+  const [pushState, setPushState] = useState<
+    'idle' | 'loading' | 'done' | 'error'
+  >('idle')
+  const [pushMsg, setPushMsg] = useState<string>('')
 
   const loadJob = useCallback(async () => {
     if (!id) return
@@ -223,6 +227,40 @@ export default function JobPage() {
       setTimeout(() => setApproveAllState('idle'), 2500)
     } catch {
       setApproveAllState('idle')
+    }
+  }
+
+  const handlePushToResolve = async () => {
+    if (!id) return
+    setPushState('loading')
+    setPushMsg('')
+    try {
+      const r = await api.resolvePush(id, {
+        mode: 'new_timeline',
+        include_near_miss: true,
+        include_rejected: false,
+      })
+      if (r.ok) {
+        const errs = r.errors?.length ? ` · ${r.errors.length} err` : ''
+        setPushMsg(`Pushed ${r.clips_added ?? 0} clips → ${r.timeline_name}${errs}`)
+        setPushState('done')
+      } else {
+        setPushMsg(r.error ?? 'Push failed.')
+        setPushState('error')
+      }
+      setTimeout(() => {
+        setPushState('idle')
+        setPushMsg('')
+      }, 6000)
+    } catch (err: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const detail = (err as any)?.response?.data?.detail
+      setPushMsg(String(detail ?? (err instanceof Error ? err.message : 'Push failed.')))
+      setPushState('error')
+      setTimeout(() => {
+        setPushState('idle')
+        setPushMsg('')
+      }, 6000)
     }
   }
 
@@ -418,9 +456,30 @@ export default function JobPage() {
               {approveAllState === 'loading' ? 'Running…' : 'Auto-approve'}
             </button>
           )}
-          <button className="cta-primary h-7" onClick={() => setShowExport(true)}>
+          <button
+            className="cta-primary h-7"
+            onClick={handlePushToResolve}
+            disabled={pushState === 'loading'}
+            title="Send approved + near-miss clips to a new timeline in the active Resolve project"
+          >
+            {pushState === 'loading' ? '↻ Pushing…' : '→ Push to Resolve'}
+          </button>
+          {pushState !== 'idle' && pushMsg && (
+            <Badge
+              variant="secondary"
+              className={cn(
+                'max-w-[260px] truncate text-[11px]',
+                pushState === 'done' && 'bg-success/15 text-[var(--success)]',
+                pushState === 'error' && 'bg-destructive/15 text-destructive',
+              )}
+              title={pushMsg}
+            >
+              {pushMsg}
+            </Badge>
+          )}
+          <button className="cta-ghost h-7" onClick={() => setShowExport(true)}>
             <Download className="h-3.5 w-3.5" />
-            Export
+            Export…
           </button>
         </div>
       </div>

@@ -67,14 +67,29 @@ def install() -> int:
     except Exception as exc:
         print(f"ERROR: could not copy plugin: {exc}", file=sys.stderr)
         return 1
+
+    # Write the repo root hint so CullingTool.py can locate the backend
+    # without the user setting any env vars. The script is installed in
+    # Resolve's Scripts dir; the repo lives wherever this installer ran
+    # from. Two levels up from `plugin/install.py` = repo root.
+    repo_root = (HERE.parent).resolve()
+    cache_dir = Path.home() / ".cache" / "wedding-culling-tool"
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / "repo_root.txt").write_text(str(repo_root) + "\n")
+    except Exception as exc:
+        print(f"WARN: could not write repo hint: {exc}", file=sys.stderr)
+
     print(f"Installed plugin → {target}")
+    print(f"Repo root hint   → {cache_dir / 'repo_root.txt'}  ({repo_root})")
     print()
     print("Next steps in DaVinci Resolve:")
     print("  1. Quit and reopen Resolve so the menu re-scans.")
     print("  2. Preferences > System > General > External scripting using = Local")
     print("  3. Workspace > Scripts > Edit > CullingTool")
     print()
-    print("Backend must be running (bash start.sh) before triggering the script.")
+    print("That single click spawns the backend if it isn't running and opens")
+    print("the tool in your default browser. No terminal needed.")
     return 0
 
 
