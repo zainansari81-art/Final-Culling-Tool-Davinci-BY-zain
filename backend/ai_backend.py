@@ -71,6 +71,19 @@ def synthesize(
             video_intel=video_intel,
         )
     if BACKEND == "cloud":
+        import cloud_credentials
+        provider = cloud_credentials.get_active_provider()
+        if provider == "vertex":
+            cloud_credentials.ensure_vertex_env_loaded()
+            import vertex_gemini
+            return vertex_gemini.synthesize(
+                keyframe_jpeg_paths=keyframe_jpeg_paths,
+                duration_sec=duration_sec,
+                shake_score=shake_score,
+                blur_score=blur_score,
+                exposure_ok=exposure_ok,
+                video_intel=video_intel,
+            )
         import cloud_gemini
         return cloud_gemini.synthesize(
             keyframe_jpeg_paths=keyframe_jpeg_paths,
@@ -97,6 +110,12 @@ def rerank_job(clip_reviews: List[Any]) -> int:
         import local_rerank
         return local_rerank.rerank_job(clip_reviews)
     if BACKEND == "cloud":
+        import cloud_credentials
+        provider = cloud_credentials.get_active_provider()
+        if provider == "vertex":
+            cloud_credentials.ensure_vertex_env_loaded()
+            import vertex_rerank
+            return vertex_rerank.rerank_job(clip_reviews)
         import cloud_rerank
         return cloud_rerank.rerank_job(clip_reviews)
     import vertex_rerank

@@ -15,7 +15,7 @@ from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Deque, Dict, List
+from typing import Any, Deque, Dict, List, Optional
 
 import re
 
@@ -223,17 +223,62 @@ def warmup_logs(since: int = 0) -> Dict[str, Any]:
 
 
 class CloudKeyBody(BaseModel):
+    """Gemini AI Studio onboarding payload."""
     api_key: str
+
+
+class VertexCredsBody(BaseModel):
+    """Vertex onboarding payload."""
+    project_id: str
+    region: str = "us-central1"
+    service_account_json: str
+
+
+class ProviderSelectBody(BaseModel):
+    provider: str  # "gemini" | "vertex"
+
+
+def _scrub_google_error(exc: Exception) -> str:
+    """Translate google-genai / google-auth errors into safe user-facing
+    strings. Never echo raw exception text — auth failures have been
+    seen to embed the key/secret."""
+    name = type(exc).__name__
+    msg = str(exc)
+    if "401" in msg or "PermissionDenied" in name or "INVALID_ARGUMENT" in msg:
+        return "Credential rejected by Google. Double-check the key / service account."
+    if "ConnectError" in name or "Timeout" in name or "Network" in name:
+        return "Couldn't reach Google. Check your internet connection."
+    if "DefaultCredentialsError" in name or "RefreshError" in name:
+        return "Service-account JSON couldn't authenticate. Confirm it's the full unmodified file from GCP."
+    if "404" in msg and "project" in msg.lower():
+        return "Project not found or Vertex AI API not enabled in that project."
+    return f"Validation failed ({name}). See server logs for details."
 
 
 @app.get("/onboarding/status", summary="Cloud onboarding status")
 def onboarding_status() -> Dict[str, Any]:
     import cloud_credentials
+    provider = cloud_credentials.get_active_provider()
     return {
-        "provider": "gemini",
-        "has_key": cloud_credentials.has_gemini_api_key(),
+        "active_provider": provider,
+        "has_credentials": cloud_credentials.has_any_credentials(),
+        "providers": {
+            "gemini": {"has_key": cloud_credentials.has_gemini_api_key()},
+            "vertex": {"has_creds": cloud_credentials.has_vertex_credentials()},
+        },
     }
 
+
+@app.post("/onboarding/select", summary="Set the active provider")
+def onboarding_select(body: ProviderSelectBody) -> Dict[str, Any]:
+    import cloud_credentials
+    if body.provider not in ("gemini", "vertex"):
+        raise HTTPException(status_code=400, detail="provider must be 'gemini' or 'vertex'")
+    cloud_credentials.set_active_provider(body.provider)
+    return {"ok": True, "provider": body.provider}
+
+
+# ── Gemini AI Studio paths ──
 
 @app.post("/onboarding/test", summary="Validate a Gemini API key without saving")
 def onboarding_test(body: CloudKeyBody) -> Dict[str, Any]:
@@ -244,22 +289,11 @@ def onboarding_test(body: CloudKeyBody) -> Dict[str, Any]:
     try:
         from google import genai
         client = genai.Client(api_key=key)
-        # Minimal call so we don't burn the user's quota — just list models.
-        # If the key is bad, this raises immediately.
         list(client.models.list())
         return {"ok": True}
     except Exception as exc:  # noqa: BLE001
-        # Log full error server-side, return a scrubbed message to the
-        # browser. Google SDK exception strings have been seen to echo
-        # back the key on auth failure — never expose them as-is.
-        logger.warning("onboarding_test failed: %s: %s", type(exc).__name__, exc)
-        scrubbed = type(exc).__name__
-        msg = str(exc)
-        if "401" in msg or "PermissionDenied" in scrubbed or "INVALID_ARGUMENT" in msg:
-            return {"ok": False, "error": "Key was rejected. Make sure you copied the whole key from AI Studio."}
-        if "ConnectError" in scrubbed or "Timeout" in scrubbed or "Network" in scrubbed:
-            return {"ok": False, "error": "Couldn't reach Google. Check your internet connection."}
-        return {"ok": False, "error": f"Validation failed ({scrubbed}). See server logs for details."}
+        logger.warning("onboarding_test (gemini) failed: %s: %s", type(exc).__name__, exc)
+        return {"ok": False, "error": _scrub_google_error(exc)}
 
 
 @app.post("/onboarding/save", summary="Persist a validated Gemini API key")
@@ -269,14 +303,96 @@ def onboarding_save(body: CloudKeyBody) -> Dict[str, Any]:
     if not cloud_credentials.looks_like_gemini_key(key):
         raise HTTPException(status_code=400, detail="API key shape invalid")
     cloud_credentials.save_gemini_api_key(key)
+    cloud_credentials.set_active_provider("gemini")
     return {"ok": True, "provider": "gemini"}
 
 
-@app.delete("/onboarding/key", summary="Remove the stored Gemini API key")
+# ── Vertex paths ──
+
+@app.post("/onboarding/vertex/test", summary="Validate Vertex credentials without saving")
+def onboarding_vertex_test(body: VertexCredsBody) -> Dict[str, Any]:
+    import cloud_credentials
+    project_id = body.project_id.strip()
+    region = (body.region or "us-central1").strip()
+    sa_json = body.service_account_json
+    if not project_id:
+        return {"ok": False, "error": "Project ID is required."}
+    if not cloud_credentials.looks_like_service_account_json(sa_json):
+        return {"ok": False, "error": "Service-account JSON looks malformed. Paste the FULL JSON file from GCP IAM."}
+    # Materialize into a temp env without persisting to keychain yet.
+    import os as _os
+    import tempfile
+    tmp_path: Optional[str] = None
+    prev_creds = _os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    prev_project = _os.environ.get("GCP_PROJECT")
+    prev_location = _os.environ.get("GCP_LOCATION")
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            f.write(sa_json)
+            tmp_path = f.name
+        _os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = tmp_path
+        _os.environ["GCP_PROJECT"] = project_id
+        _os.environ["GCP_LOCATION"] = region
+        from google import genai
+        client = genai.Client(vertexai=True, project=project_id, location=region)
+        # Real network call — fails immediately on bad creds / disabled API.
+        list(client.models.list())
+        return {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("onboarding_test (vertex) failed: %s: %s", type(exc).__name__, exc)
+        return {"ok": False, "error": _scrub_google_error(exc)}
+    finally:
+        # Always restore env exactly and unlink the temp file, even on
+        # early exceptions before genai got a chance to run.
+        if prev_creds is not None:
+            _os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = prev_creds
+        else:
+            _os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        if prev_project is not None:
+            _os.environ["GCP_PROJECT"] = prev_project
+        else:
+            _os.environ.pop("GCP_PROJECT", None)
+        if prev_location is not None:
+            _os.environ["GCP_LOCATION"] = prev_location
+        else:
+            _os.environ.pop("GCP_LOCATION", None)
+        if tmp_path is not None:
+            try:
+                _os.unlink(tmp_path)
+            except Exception:  # noqa: BLE001
+                pass
+
+
+@app.post("/onboarding/vertex/save", summary="Persist validated Vertex credentials")
+def onboarding_vertex_save(body: VertexCredsBody) -> Dict[str, Any]:
+    import cloud_credentials
+    project_id = body.project_id.strip()
+    region = (body.region or "us-central1").strip()
+    sa_json = body.service_account_json
+    if not project_id:
+        raise HTTPException(status_code=400, detail="project_id required")
+    if not cloud_credentials.looks_like_service_account_json(sa_json):
+        raise HTTPException(status_code=400, detail="service_account_json malformed")
+    cloud_credentials.save_vertex_credentials(project_id, region, sa_json)
+    cloud_credentials.set_active_provider("vertex")
+    cloud_credentials.ensure_vertex_env_loaded()  # warm env so first job doesn't pay the cold path
+    return {"ok": True, "provider": "vertex", "project_id": project_id, "region": region}
+
+
+# ── Reset ──
+
+@app.delete("/onboarding/key", summary="Remove the stored Gemini API key (legacy)")
 def onboarding_delete() -> Dict[str, Any]:
     import cloud_credentials
     removed = cloud_credentials.delete_gemini_api_key()
     return {"removed": removed}
+
+
+@app.delete("/onboarding/all", summary="Wipe every stored cloud credential")
+def onboarding_delete_all() -> Dict[str, Any]:
+    import cloud_credentials
+    cloud_credentials.clear_all()
+    return {"ok": True}
 
 
 @app.get("/ai/info", summary="Active AI backend info")
@@ -296,12 +412,21 @@ def ai_info() -> Dict[str, Any]:
             "has_key": True,
         }
     if backend == "cloud":
+        provider = cloud_credentials.get_active_provider()
+        if provider == "vertex":
+            label = "Cloud (Vertex + Gemini)"
+            has_key = cloud_credentials.has_vertex_credentials()
+        else:
+            # default = gemini AI Studio (also when nothing selected yet)
+            label = "Cloud (Gemini · AI Studio)"
+            has_key = cloud_credentials.has_gemini_api_key()
         return {
             "backend": "cloud",
-            "label": "Cloud (Gemini via AI Studio)",
+            "provider": provider or "gemini",
+            "label": label,
             "vlm_model": _os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
-            "clip_model": "ViT-B-32",  # local CLIP still augments cloud Gemini
-            "has_key": cloud_credentials.has_gemini_api_key(),
+            "clip_model": None,
+            "has_key": has_key,
         }
     return {
         "backend": "vertex",
