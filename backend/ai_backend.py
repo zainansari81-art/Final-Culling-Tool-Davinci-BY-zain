@@ -43,8 +43,8 @@ def analyze_video(
             file_path, cleanup=cleanup, keyframe_paths=keyframe_paths,
         )
     if BACKEND == "cloud":
-        import local_video
-        return local_video.analyze_local_file(
+        import cloud_video
+        return cloud_video.analyze_local_file(
             file_path, cleanup=cleanup, keyframe_paths=keyframe_paths,
         )
     import vertex_video
