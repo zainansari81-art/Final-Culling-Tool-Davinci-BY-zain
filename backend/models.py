@@ -74,6 +74,10 @@ class ClipScore(BaseModel):
     needs_stabilization: bool = False             # camera never settled long enough
     placement_confidence: Optional[float] = None  # 0-100 from Gemini
     analysis_sec: Optional[float] = None         # wall-clock seconds spent analyzing this clip
+    ai_reasoning: List[str] = Field(
+        default_factory=list,
+        description="Human-readable trace of every decision made for this clip.",
+    )
 
 
 class ClipReview(BaseModel):

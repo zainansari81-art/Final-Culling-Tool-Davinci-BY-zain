@@ -391,16 +391,39 @@ def analyze_single_clip(file_path: str, job_id: str) -> ClipReview:
     # record-stop. Reject regardless of AI judgement.
     if duration < 2.0:
         approved_default = False
+        scores.ai_reasoning.append(
+            f"Auto-reject: duration {duration:.2f}s under 2.0s minimum (likely camera fumble)."
+        )
     elif scores.ai_segment is not None:
         ai_quality = scores.ai_quality if scores.ai_quality is not None else 5.0
-        approved_default = (
-            (not scores.ai_skip)
-            and scores.ai_segment != "Backup"
-            and ai_quality >= 3.0
-        )
+        if scores.ai_skip:
+            approved_default = False
+            scores.ai_reasoning.append(
+                f"Auto-reject: AI skip=true ({scores.ai_skip_reason or 'no reason given'})."
+            )
+        elif scores.ai_segment == "Backup":
+            approved_default = False
+            scores.ai_reasoning.append(
+                "Auto-reject: segment=Backup (test footage / unusable)."
+            )
+        elif ai_quality < 3.0:
+            approved_default = False
+            scores.ai_reasoning.append(
+                f"Auto-reject: AI quality {ai_quality:.1f}/10 below 3.0 threshold."
+            )
+        else:
+            approved_default = True
+            scores.ai_reasoning.append(
+                f"Auto-approve: segment={scores.ai_segment}, "
+                f"quality {ai_quality:.1f}/10, not skipped, duration {duration:.1f}s."
+            )
     else:
         approved_default = (
             shake_score < 0.5 and blur_score < 0.85 and exposure_ok
+        )
+        scores.ai_reasoning.append(
+            f"No AI segment — heuristic verdict {approved_default} "
+            f"(shake={shake_score:.2f}, blur={blur_score:.2f}, exposure_ok={exposure_ok})."
         )
 
     scores.analysis_sec = round(time.monotonic() - _t0, 3)
@@ -514,6 +537,11 @@ def _run_ai_pipeline(
         out_s = decision.get("out_sec")
         scores.ai_in_sec = float(in_s) if isinstance(in_s, (int, float)) else None
         scores.ai_out_sec = float(out_s) if isinstance(out_s, (int, float)) else None
+        # Fold the VLM's reasoning bullets (Qwen initial / audit / CLIP
+        # override) into the per-clip trace so the UI can show them.
+        vlm_reasoning = decision.get("_reasoning") or []
+        if isinstance(vlm_reasoning, list):
+            scores.ai_reasoning.extend(str(r) for r in vlm_reasoning)
 
     # ─── Stability + dense-feature trim (Phase 1b) ───────────────────────
     # Pulls one motion sample per second via dense_features.extract_dense
@@ -539,10 +567,18 @@ def _run_ai_pipeline(
                 "Stability trim %s: %.2fs–%.2fs (longest steady run %.1fs, %d motion samples)",
                 fname, stab.in_sec, stab.out_sec, stab.longest_stable_sec, len(dense.motion),
             )
+            scores.ai_reasoning.append(
+                f"Stability trim: {stab.in_sec:.2f}s–{stab.out_sec:.2f}s "
+                f"(longest steady run {stab.longest_stable_sec:.1f}s, {len(dense.motion)} samples)"
+            )
         elif stab.needs_stabilization:
             logger.info(
                 "%s flagged Needs Stabilization (longest steady run %.1fs, %d motion samples)",
                 fname, stab.longest_stable_sec, len(dense.motion),
+            )
+            scores.ai_reasoning.append(
+                f"Needs Stabilization (longest steady run only {stab.longest_stable_sec:.1f}s, "
+                f"under 1.5s threshold)"
             )
         # ─── Archetype-aware trim refinement (Phase 1c) ──────────────────
         # Stability picked the longest steady run; this picks the steady
@@ -592,6 +628,11 @@ def _run_ai_pipeline(
                             )
                             scores.ai_in_sec = new_in
                             scores.ai_out_sec = new_out
+                            scores.ai_reasoning.append(
+                                f"Archetype refine [{scores.ai_segment}]: "
+                                f"{stab.in_sec:.2f}s–{stab.out_sec:.2f}s → "
+                                f"{new_in:.2f}s–{new_out:.2f}s (score {score:.3f})"
+                            )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Archetype refine failed for %s: %s", fname, exc)
         # Persist dense features as a sidecar so archetype scorers can
@@ -612,6 +653,9 @@ def _run_ai_pipeline(
         # a shaky one based on incidental speech.
         scores.needs_stabilization = True
         logger.warning("Stability trim failed for %s: %s", fname, exc)
+        scores.ai_reasoning.append(
+            f"Stability/dense pipeline failed: {exc}. Assumed needs_stabilization."
+        )
 
     # ─── Clip type classification (AROLL vs BROLL) ────────────────────────
     # AROLL only when speech is genuinely the subject of the clip:

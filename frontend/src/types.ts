@@ -30,6 +30,7 @@ export interface ClipResult {
   dialogue_trimmed?: boolean
   needs_stabilization: boolean
   analysis_sec: number | null
+  ai_reasoning: string[]
   word_count?: number
 }
 

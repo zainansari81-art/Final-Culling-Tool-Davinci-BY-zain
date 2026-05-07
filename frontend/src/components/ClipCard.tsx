@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Copy, Eye, Mic, MoveVertical, Play, Scissors, Sparkles, Wind, X } from 'lucide-react'
+import { Brain, Check, ChevronDown, Copy, Eye, Mic, MoveVertical, Play, Scissors, Sparkles, Wind, X } from 'lucide-react'
 import { api } from '../api'
 import { SEGMENTS } from '../constants'
 import type { ClipResult, UpdateClipRequest } from '../types'
@@ -31,6 +31,7 @@ export default function ClipCard({
 }: Props) {
   const [imgError, setImgError] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [whyOpen, setWhyOpen] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
 
   // When AI rated the clip well, suppress noisy heuristic flags. Cinematic
@@ -299,6 +300,41 @@ export default function ClipCard({
             invert
           />
         </div>
+
+        {clip.ai_reasoning && clip.ai_reasoning.length > 0 && (
+          <div className="rounded border border-border/60 bg-muted/30">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between gap-1 px-2 py-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+              onClick={(e) => {
+                e.stopPropagation()
+                setWhyOpen((v) => !v)
+              }}
+              title="Show AI decision trace"
+            >
+              <span className="flex items-center gap-1">
+                <Brain className="h-3 w-3" />
+                Why?
+              </span>
+              <ChevronDown
+                className={cn(
+                  'h-3 w-3 transition-transform',
+                  whyOpen && 'rotate-180',
+                )}
+              />
+            </button>
+            {whyOpen && (
+              <ul className="space-y-1 border-t border-border/60 px-2 py-1.5 text-[10.5px] leading-snug text-muted-foreground">
+                {clip.ai_reasoning.map((line, i) => (
+                  <li key={i} className="flex gap-1.5">
+                    <span className="select-none text-muted-foreground/60">·</span>
+                    <span className="flex-1">{line}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         <div className="flex gap-1.5">
           <Button

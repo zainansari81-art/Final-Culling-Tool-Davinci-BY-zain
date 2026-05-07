@@ -202,7 +202,9 @@ def synthesize(
     images = [p for p in keyframe_jpeg_paths[:MAX_KEYFRAMES] if Path(p).exists()]
     if not images:
         logger.warning("local_vlm: no keyframes, returning heuristic decision")
-        return _heuristic_decision(duration_sec, shake_score, blur_score, exposure_ok, video_intel)
+        d = _heuristic_decision(duration_sec, shake_score, blur_score, exposure_ok, video_intel)
+        d["_reasoning"] = ["VLM skipped: no keyframes available; heuristic fallback used."]
+        return d
 
     prompt = _PROMPT.format(
         clip_labels=clip_labels,
@@ -218,13 +220,21 @@ def synthesize(
         text = _vlm_executor.submit(_run_inference, prompt, images).result()
     except Exception as exc:  # noqa: BLE001
         logger.exception("local_vlm: inference failed: %s", exc)
-        return _heuristic_decision(duration_sec, shake_score, blur_score, exposure_ok, video_intel)
+        d = _heuristic_decision(duration_sec, shake_score, blur_score, exposure_ok, video_intel)
+        d["_reasoning"] = [f"VLM inference failed ({exc}); heuristic fallback used."]
+        return d
 
     parsed = _parse_json(text)
     if not parsed:
         logger.warning("local_vlm: could not parse JSON from VLM output: %s", text[:200])
-        return _heuristic_decision(duration_sec, shake_score, blur_score, exposure_ok, video_intel)
+        d = _heuristic_decision(duration_sec, shake_score, blur_score, exposure_ok, video_intel)
+        d["_reasoning"] = ["VLM emitted unparseable JSON; heuristic fallback used."]
+        return d
     initial = _normalize(parsed)
+    reasoning: List[str] = [
+        f"VLM initial: segment={initial.get('segment')!r}, "
+        f"quality={initial.get('quality')}, skip={initial.get('skip')}."
+    ]
 
     if AUDIT_PASS:
         audited = _run_audit(
@@ -240,7 +250,15 @@ def synthesize(
                     "local_vlm: audit corrected segment %r → %r",
                     initial.get("segment"), audited.get("segment"),
                 )
+                reasoning.append(
+                    f"Audit corrected segment: {initial.get('segment')!r} → "
+                    f"{audited.get('segment')!r}."
+                )
+            else:
+                reasoning.append("Audit confirmed initial decision.")
             initial = audited
+        else:
+            reasoning.append("Audit pass returned no result; kept initial decision.")
 
     # CLIP-based segment override. Trust CLIP when its top score is ahead
     # of runner-up by CLIP_SEGMENT_MARGIN — Qwen2-VL 2B otherwise confuses
@@ -249,16 +267,27 @@ def synthesize(
     if clip_seg and isinstance(clip_seg.get("ranked"), list) and len(clip_seg["ranked"]) >= 2:
         top_seg, top_score = clip_seg["ranked"][0]
         _, runner_score = clip_seg["ranked"][1]
+        margin = top_score - runner_score
         effective_margin = (
             0.0 if initial.get("segment") == "Backup" else CLIP_SEGMENT_MARGIN
         )
-        if (top_score - runner_score) >= effective_margin and top_seg != initial.get("segment"):
+        if margin >= effective_margin and top_seg != initial.get("segment"):
             logger.info(
                 "local_vlm: CLIP override segment %r → %r (score=%.3f, margin=%.3f, effective=%.3f)",
-                initial.get("segment"), top_seg, top_score, top_score - runner_score, effective_margin,
+                initial.get("segment"), top_seg, top_score, margin, effective_margin,
+            )
+            reasoning.append(
+                f"CLIP override fired: {initial.get('segment')!r} → {top_seg!r} "
+                f"(top score {top_score:.3f}, margin {margin:.3f} ≥ {effective_margin:.3f})."
             )
             initial["segment"] = top_seg
+        else:
+            reasoning.append(
+                f"CLIP top {top_seg!r} ({top_score:.3f}) did not override "
+                f"{initial.get('segment')!r} (margin {margin:.3f} < {effective_margin:.3f})."
+            )
 
+    initial["_reasoning"] = reasoning
     return initial
 
 
