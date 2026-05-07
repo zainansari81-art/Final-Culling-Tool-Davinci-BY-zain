@@ -131,7 +131,54 @@ def _selectable_clips(
     return keep, skip
 
 
-def _trim_frames(clip: Any, fps: float) -> Tuple[Optional[int], Optional[int]]:
+def _source_frame_info(item: Any, project_fps: float) -> Tuple[float, Optional[int]]:
+    """Return (source_fps, total_frames) for a media pool item.
+
+    Resolve's AppendToTimeline interprets startFrame / endFrame against
+    the SOURCE clip's framerate. Using project framerate when the source
+    differs (e.g. project 23.976, clip 29.97) reads past the end of the
+    clip → the timeline subclip ends in a freeze frame because Resolve
+    repeats the last frame for the missing range.
+    """
+    src_fps = project_fps
+    total_frames: Optional[int] = None
+    try:
+        for key in ("FPS", "Frame Rate", "Video Frame Rate"):
+            v = item.GetClipProperty(key)
+            if not v:
+                continue
+            try:
+                src_fps = float(str(v).split()[0])
+                if src_fps > 0:
+                    break
+            except (TypeError, ValueError):
+                continue
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        for key in ("Frames", "Total Frames"):
+            v = item.GetClipProperty(key)
+            if not v:
+                continue
+            try:
+                total_frames = int(str(v).split()[0])
+                if total_frames > 0:
+                    break
+            except (TypeError, ValueError):
+                continue
+    except Exception:  # noqa: BLE001
+        pass
+    return src_fps, total_frames
+
+
+def _trim_frames(
+    clip: Any,
+    item: Any,
+    project_fps: float,
+) -> Tuple[Optional[int], Optional[int]]:
+    """Convert ai_in_sec / ai_out_sec into SOURCE-clip frames + cap to the
+    actual frame count so AppendToTimeline never reads past the end.
+    """
     scores = getattr(clip, "scores", None)
     if not scores:
         return None, None
@@ -140,11 +187,25 @@ def _trim_frames(clip: Any, fps: float) -> Tuple[Optional[int], Optional[int]]:
     duration = getattr(scores, "duration_sec", None) or 0.0
     if not (isinstance(in_sec, (int, float)) and isinstance(out_sec, (int, float))):
         return None, None
+
+    src_fps, total_frames = _source_frame_info(item, project_fps)
     in_sec = max(0.0, float(in_sec))
-    out_sec = min(float(duration) if duration else float(out_sec), float(out_sec))
+    if duration:
+        out_sec = min(float(duration), float(out_sec))
     if out_sec <= in_sec:
         return None, None
-    return int(round(in_sec * fps)), int(round(out_sec * fps))
+
+    in_f = int(round(in_sec * src_fps))
+    out_f = int(round(out_sec * src_fps))
+    if total_frames:
+        # endFrame is INCLUSIVE in Resolve's API; clamp to the last
+        # real frame index to avoid the freeze-frame tail.
+        max_idx = total_frames - 1
+        in_f = min(in_f, max_idx)
+        out_f = min(out_f, max_idx)
+    if out_f <= in_f:
+        return None, None
+    return in_f, out_f
 
 
 def _marker_for(clip: Any) -> Tuple[str, str, str]:
@@ -252,7 +313,7 @@ def push_job(
         if item is None:
             errors.append(f"Could not import {path}")
             continue
-        in_f, out_f = _trim_frames(clip, fps)
+        in_f, out_f = _trim_frames(clip, item, fps)
         seg = {"mediaPoolItem": item}
         if in_f is not None and out_f is not None and out_f > in_f:
             seg["startFrame"] = in_f

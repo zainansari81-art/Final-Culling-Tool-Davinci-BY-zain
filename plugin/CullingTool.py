@@ -288,7 +288,9 @@ def _open_app_window(url: str) -> None:
             args = [
                 c,
                 f"--app={url}",
-                "--window-size=1340,840",
+                # Snug window. User can still resize from the OS chrome.
+                "--window-size=1100,720",
+                "--window-position=120,80",
                 "--disable-features=TranslateUI",
             ]
             kwargs = {

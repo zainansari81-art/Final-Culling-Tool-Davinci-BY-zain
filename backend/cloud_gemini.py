@@ -56,6 +56,14 @@ Clip duration: {duration_sec} seconds
 Detected labels (top by confidence): {labels}
 Transcript: {transcript}
 
+RATIONALE RULES:
+- 2-3 short sentences, conversational, present tense.
+- Talk about WHAT IS HAPPENING in the shot and WHY this clip works (or doesn't) editorially.
+- Mention concrete visual cues: composition, light, motion, subjects, mood.
+- Never use technical jargon ("keyframes", "VLM", "stability score", "Farneback").
+- Example for a clean outdoor first-look: "The groom waits in soft outdoor light, the camera holds steady on his back. The framing is clean and cinematic with the white fence behind. This is a usable wide that leads into the reveal."
+- Example for a fumbled shot: "Camera is shaky and tilts mid-pan. The subject leaves frame at the end. Skip."
+
 Respond with ONLY valid JSON, no prose, no markdown fences:
 {{
   "segment": "<one of the canonical segments>",
@@ -66,7 +74,8 @@ Respond with ONLY valid JSON, no prose, no markdown fences:
   "skip": <true|false>,
   "skip_reason": "<short reason if skip=true, else null>",
   "in_sec": <number or null>,
-  "out_sec": <number or null>
+  "out_sec": <number or null>,
+  "rationale": "<2-3 sentence editor's note: what's happening, what works visually, why this clip is worth keeping or not. Speak like a senior wedding editor explaining the cull to a junior. Do NOT mention 'frames' / 'keyframes' / technical metrics — talk about the SHOT."
 }}
 """
 
@@ -149,7 +158,14 @@ def synthesize(
     text = (resp.text or "").strip()
     if not text:
         return None
-    return _parse_json(text)
+    parsed = _parse_json(text)
+    if isinstance(parsed, dict):
+        rat = parsed.get("rationale")
+        if isinstance(rat, str):
+            parsed["rationale"] = rat.strip() or None
+        else:
+            parsed["rationale"] = None
+    return parsed
 
 
 def _parse_json(text: str) -> Optional[Dict[str, Any]]:
