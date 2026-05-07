@@ -527,6 +527,7 @@ def _run_ai_pipeline(
         scores.ai_segment = decision.get("segment")
         scores.ai_moment = decision.get("moment")
         scores.ai_caption = decision.get("caption")
+        scores.ai_rationale = decision.get("rationale") or None
         q = decision.get("quality")
         if isinstance(q, (int, float)):
             scores.ai_quality = float(q)

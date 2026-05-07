@@ -57,6 +57,7 @@ class ClipScore(BaseModel):
     ai_segment: Optional[str] = None              # Gemini's segment classification
     ai_moment: Optional[str] = None               # 3-7 word description
     ai_caption: Optional[str] = None              # human-friendly summary
+    ai_rationale: Optional[str] = None             # 2-3 sentence editorial narrative from the VLM
     ai_quality: Optional[float] = Field(default=None, ge=0.0, le=10.0)
     ai_subjects: List[str] = Field(default_factory=list)
     ai_skip: bool = False                         # Gemini-recommended skip

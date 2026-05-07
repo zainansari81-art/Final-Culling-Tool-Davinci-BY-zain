@@ -301,7 +301,7 @@ export default function ClipCard({
           />
         </div>
 
-        {clip.ai_reasoning && clip.ai_reasoning.length > 0 && (
+        {(clip.ai_rationale || (clip.ai_reasoning && clip.ai_reasoning.length > 0)) && (
           <div className="rounded border border-border/60 bg-muted/30">
             <button
               type="button"
@@ -310,7 +310,7 @@ export default function ClipCard({
                 e.stopPropagation()
                 setWhyOpen((v) => !v)
               }}
-              title="Show AI decision trace"
+              title="What the AI thought about this clip"
             >
               <span className="flex items-center gap-1">
                 <Brain className="h-3 w-3" />
@@ -324,14 +324,32 @@ export default function ClipCard({
               />
             </button>
             {whyOpen && (
-              <ul className="space-y-1 border-t border-border/60 px-2 py-1.5 text-[10.5px] leading-snug text-muted-foreground">
-                {clip.ai_reasoning.map((line, i) => (
-                  <li key={i} className="flex gap-1.5">
-                    <span className="select-none text-muted-foreground/60">·</span>
-                    <span className="flex-1">{line}</span>
-                  </li>
-                ))}
-              </ul>
+              <div className="space-y-2 border-t border-border/60 px-2 py-2 text-[11px] leading-snug">
+                {clip.ai_rationale ? (
+                  <p className="text-foreground/90">{clip.ai_rationale}</p>
+                ) : (
+                  <p className="italic text-muted-foreground/70">
+                    No editor's note from the AI for this clip.
+                  </p>
+                )}
+                {clip.ai_reasoning && clip.ai_reasoning.length > 0 && (
+                  <details className="text-[10.5px] text-muted-foreground">
+                    <summary className="cursor-pointer select-none hover:text-foreground">
+                      Technical trace ({clip.ai_reasoning.length})
+                    </summary>
+                    <ul className="mt-1 space-y-1">
+                      {clip.ai_reasoning.map((line, i) => (
+                        <li key={i} className="flex gap-1.5">
+                          <span className="select-none text-muted-foreground/60">
+                            ·
+                          </span>
+                          <span className="flex-1">{line}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </div>
             )}
           </div>
         )}

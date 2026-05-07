@@ -28,6 +28,7 @@ function toClipResult(raw: any): ClipResult {
     near_miss: raw.near_miss ?? false,
     reject_reason: null,
     ai_caption: scores.ai_caption ?? null,
+    ai_rationale: scores.ai_rationale ?? null,
     ai_moment: scores.ai_moment ?? null,
     ai_quality: scores.ai_quality ?? null,
     ai_subjects: scores.ai_subjects ?? [],

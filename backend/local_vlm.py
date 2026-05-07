@@ -94,7 +94,7 @@ Audit the decision. Be strict:
 6. If the initial decision is correct, return it unchanged.
 
 Return ONLY the corrected JSON, same schema:
-{{"segment":"<one of canonical>","moment":"<3-7 words>","caption":"<one literal sentence>","quality":<0-10>,"subjects":["..."],"skip":<true|false>,"skip_reason":"<reason or null>","in_sec":<number or null>,"out_sec":<number or null>}}
+{{"segment":"<one of canonical>","moment":"<3-7 words>","caption":"<one literal sentence>","quality":<0-10>,"subjects":["..."],"skip":<true|false>,"skip_reason":"<reason or null>","in_sec":<number or null>,"out_sec":<number or null>,"rationale":"<2-3 sentence editor's note. Same rules as the initial prompt — describe the shot editorially, no technical jargon. If the initial rationale already does this, return it unchanged.>"}}
 """
 
 
@@ -133,8 +133,16 @@ composition, focus, lighting, presence of subjects. Do NOT auto-zero a
 clip just because of camera shake — handheld wedding footage is normal.
 A clean static shot of a beautiful object is 7+, not 3.
 
+RATIONALE RULES:
+- 2-3 short sentences, conversational, present tense.
+- Talk about WHAT IS HAPPENING in the shot and WHY this clip works (or doesn't) editorially.
+- Mention concrete visual cues: composition, light, motion, subjects, mood.
+- Never use technical jargon ("keyframes", "VLM", "stability score", "Farneback").
+- Example for a clean outdoor first-look: "The groom waits in soft outdoor light, the camera holds steady on his back. The framing is clean and cinematic with the white fence behind. This is a usable wide that leads into the reveal."
+- Example for a fumbled shot: "Camera is shaky and tilts mid-pan. The subject leaves frame at the end. Skip."
+
 Respond with ONLY valid JSON, no prose, no markdown:
-{{"segment":"<one of canonical>","moment":"<3-7 words>","caption":"<one sentence>","quality":<0-10>,"subjects":["..."],"skip":<true|false>,"skip_reason":"<reason or null>","in_sec":<number or null>,"out_sec":<number or null>}}
+{{"segment":"<one of canonical>","moment":"<3-7 words>","caption":"<one literal sentence>","quality":<0-10>,"subjects":["..."],"skip":<true|false>,"skip_reason":"<reason or null>","in_sec":<number or null>,"out_sec":<number or null>,"rationale":"<2-3 sentence editor's note: what's happening, what works visually, why this clip is worth keeping or not. Speak like a senior wedding editor explaining the cull to a junior. Do NOT mention 'frames' / 'keyframes' / technical metrics — talk about the SHOT.>"}}
 """
 
 _model = None
@@ -372,6 +380,7 @@ def _normalize(d: Dict[str, Any]) -> Dict[str, Any]:
         "skip_reason": (str(d["skip_reason"]).strip() if d.get("skip_reason") else None),
         "in_sec": _coerce_optional_float(d.get("in_sec")),
         "out_sec": _coerce_optional_float(d.get("out_sec")),
+        "rationale": (str(d["rationale"]).strip() if d.get("rationale") else None),
     }
 
 
@@ -416,4 +425,5 @@ def _heuristic_decision(
         "skip_reason": "low quality (heuristic)" if skip else None,
         "in_sec": None,
         "out_sec": None,
+        "rationale": "Heuristic fallback — VLM did not produce a usable response.",
     }

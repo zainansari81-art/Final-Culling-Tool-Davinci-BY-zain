@@ -17,6 +17,7 @@ export interface ClipResult {
   reject_reason: string | null
   // AI-derived
   ai_caption?: string | null
+  ai_rationale?: string | null
   ai_moment?: string | null
   ai_quality?: number | null
   ai_subjects?: string[]
