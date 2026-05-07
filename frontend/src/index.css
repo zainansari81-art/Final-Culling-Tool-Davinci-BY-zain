@@ -4,42 +4,41 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: #0b0c0f;
-  --foreground: #ebecef;
-  --card: #14161b;
-  --card-foreground: #ebecef;
-  --popover: #181b21;
-  --popover-foreground: #ebecef;
+  /* DaVinci Resolve dark grey palette — not pitch black. */
+  --background: #1d1f23;
+  --foreground: #d8dade;
+  --card: #25272b;
+  --card-foreground: #d8dade;
+  --popover: #2a2c30;
+  --popover-foreground: #d8dade;
   --primary: #ff8a3c;
   --primary-foreground: #1a0e04;
-  --secondary: #1a1d24;
-  --secondary-foreground: #ebecef;
-  --muted: #15181d;
-  --muted-foreground: #8b8f97;
-  --accent: #1f232b;
-  --accent-foreground: #f4f5f8;
-  --destructive: #ef4d56;
+  --secondary: #2a2c30;
+  --secondary-foreground: #d8dade;
+  --muted: #25272b;
+  --muted-foreground: #8d8f95;
+  --accent: #2e3036;
+  --accent-foreground: #ebecef;
+  --destructive: #e25862;
   --destructive-foreground: #ffffff;
-  --border: #232730;
-  --border-strong: #353a44;
-  --input: #1a1d24;
+  --border: #34373c;
+  --border-strong: #43464d;
+  --input: #2a2c30;
   --ring: #ff8a3c;
-  --success: #2ecc71;
+  --success: #2fb86b;
   --success-foreground: #051d10;
-  --warning: #f5a524;
+  --warning: #e6a230;
   --info: #4fb6ee;
-  --rail: #0a0b0e;
-  --panel: #14161b;
-  --panel-header: #181b21;
-  --grid-line: rgba(255, 255, 255, 0.022);
-  --hatch: rgba(255, 255, 255, 0.025);
-  --radius: 0.625rem;
+  --rail: #181a1d;
+  --panel: #25272b;
+  --panel-header: #2a2c30;
+  --radius: 0.25rem;
 
-  --tag-1: #e84e6c;
-  --tag-2: #f5a524;
+  --tag-1: #e25862;
+  --tag-2: #e6a230;
   --tag-3: #4fb6ee;
   --tag-4: #b362ff;
-  --tag-5: #2ecc71;
+  --tag-5: #2fb86b;
   --tag-6: #ff8a3c;
   --tag-7: #2dd4bf;
   --tag-8: #94a3b8;
@@ -73,10 +72,10 @@
   --color-rail: var(--rail);
   --color-panel: var(--panel);
   --color-panel-header: var(--panel-header);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-sm: calc(var(--radius));
+  --radius-md: calc(var(--radius) + 1px);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 3px);
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
     Roboto, sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
@@ -96,40 +95,30 @@
   }
   body {
     font-family: var(--font-sans);
-    font-size: 14px;
+    font-size: 13px;
     background-color: var(--background);
-    background-image:
-      radial-gradient(ellipse 70% 45% at 50% -8%,
-        color-mix(in srgb, var(--primary) 5%, transparent),
-        transparent 70%),
-      linear-gradient(var(--grid-line) 1px, transparent 1px),
-      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
-    background-size: 100% 100%, 48px 48px, 48px 48px;
-    background-attachment: fixed;
   }
   #root {
     min-height: 100svh;
+    display: flex;
+    flex-direction: column;
   }
   ::selection {
     background: color-mix(in srgb, var(--ring) 35%, transparent);
   }
   ::-webkit-scrollbar {
-    width: 9px;
-    height: 9px;
+    width: 8px;
+    height: 8px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
     background: var(--border-strong);
-    border: 2px solid transparent;
-    background-clip: padding-box;
     border-radius: 999px;
   }
   ::-webkit-scrollbar-thumb:hover {
     background: color-mix(in srgb, var(--border-strong) 50%, var(--muted-foreground));
-    background-clip: padding-box;
-    border: 2px solid transparent;
   }
   .tabular-nums, kbd, code, .font-mono {
     font-feature-settings: "tnum", "ss01";
@@ -137,17 +126,10 @@
 }
 
 @layer components {
-  /* Calm rounded panel — no brackets. */
   .panel {
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    overflow: hidden;
-  }
-  .panel[data-state="active"] {
-    border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 20%, transparent),
-      0 18px 38px -22px color-mix(in srgb, var(--primary) 60%, transparent);
   }
   .panel-header {
     display: flex;
@@ -155,38 +137,26 @@
     justify-content: space-between;
     border-bottom: 1px solid var(--border);
     background: var(--panel-header);
-    padding: 0.65rem 0.9rem;
+    padding: 0.55rem 0.75rem;
+    height: 36px;
   }
 
-  .hud-hatch {
-    background-image: repeating-linear-gradient(
-      135deg,
-      transparent 0,
-      transparent 6px,
-      var(--hatch) 6px,
-      var(--hatch) 7px
-    );
-  }
-
-  /* Smooth gradient progress (default) */
   .smooth-progress {
-    height: 6px;
+    height: 4px;
     width: 100%;
     overflow: hidden;
-    background: var(--muted);
+    background: var(--rail);
     border-radius: 999px;
   }
   .smooth-progress > i {
     display: block;
     height: 100%;
     background: linear-gradient(90deg, var(--primary), color-mix(in srgb, var(--primary) 70%, var(--warning)));
-    box-shadow: 0 0 12px -2px color-mix(in srgb, var(--primary) 50%, transparent);
     border-radius: 999px;
     transition: width 0.4s ease;
   }
   .smooth-progress.success > i {
     background: linear-gradient(90deg, color-mix(in srgb, var(--success) 80%, transparent), var(--success));
-    box-shadow: 0 0 12px -2px color-mix(in srgb, var(--success) 50%, transparent);
   }
 
   .clip-tag {
@@ -195,73 +165,62 @@
     align-self: stretch;
   }
 
-  /* Primary CTA — Resolve-style filled button */
   .cta-primary {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
-    padding: 0.55rem 1rem;
-    font-size: 13px;
+    gap: 0.45rem;
+    padding: 0.4rem 0.85rem;
+    font-size: 12.5px;
     font-weight: 500;
     color: var(--primary-foreground);
     background: linear-gradient(180deg,
-      color-mix(in srgb, var(--primary) 110%, white 5%),
+      color-mix(in srgb, var(--primary) 110%, white 4%),
       var(--primary));
     border: 1px solid color-mix(in srgb, var(--primary) 70%, black);
-    border-radius: calc(var(--radius) - 2px);
-    box-shadow:
-      0 0 22px -10px color-mix(in srgb, var(--primary) 80%, transparent),
-      inset 0 1px 0 0 color-mix(in srgb, white 22%, transparent);
-    transition: all 0.15s ease;
+    border-radius: var(--radius);
+    box-shadow: inset 0 1px 0 0 color-mix(in srgb, white 18%, transparent);
+    transition: filter 0.12s ease;
   }
   .cta-primary:hover:not(:disabled) {
     filter: brightness(1.07);
-    box-shadow:
-      0 0 28px -8px color-mix(in srgb, var(--primary) 90%, transparent),
-      inset 0 1px 0 0 color-mix(in srgb, white 22%, transparent);
   }
   .cta-primary:disabled {
     opacity: 0.45;
     cursor: not-allowed;
-    box-shadow: none;
   }
 
   .cta-ghost {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
-    padding: 0.5rem 0.85rem;
-    font-size: 13px;
+    gap: 0.45rem;
+    padding: 0.35rem 0.75rem;
+    font-size: 12.5px;
     color: var(--foreground);
     background: var(--muted);
     border: 1px solid var(--border-strong);
-    border-radius: calc(var(--radius) - 2px);
-    transition: all 0.15s ease;
+    border-radius: var(--radius);
+    transition: all 0.12s ease;
   }
   .cta-ghost:hover:not(:disabled) {
+    background: var(--accent);
     border-color: color-mix(in srgb, var(--primary) 50%, var(--border-strong));
-    color: var(--foreground);
-    background: color-mix(in srgb, var(--primary) 5%, var(--muted));
   }
   .cta-ghost:disabled {
     opacity: 0.4;
     cursor: not-allowed;
   }
 
-  /* Soft section eyebrow above headings */
-  .eyebrow {
-    font-size: 11px;
-    letter-spacing: 0.06em;
+  .titlebar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel-header);
+    padding: 0 0.75rem;
+    height: 32px;
+    font-size: 11.5px;
     color: var(--muted-foreground);
-    text-transform: none;
-    font-weight: 500;
-  }
-
-  /* Subtle section divider */
-  .soft-divider {
-    height: 1px;
-    background: linear-gradient(90deg, transparent, var(--border), transparent);
   }
 }

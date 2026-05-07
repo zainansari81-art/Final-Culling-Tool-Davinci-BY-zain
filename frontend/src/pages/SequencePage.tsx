@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  ArrowLeft,
   ArrowDown,
   ArrowUp,
   ChevronDown,
@@ -23,6 +22,7 @@ import {
   type SequenceWord,
 } from '../api'
 import BackendError from '../components/BackendError'
+import Shell from '../components/Shell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -211,48 +211,43 @@ export default function SequencePage() {
   }
 
   return (
-    <div className="min-h-svh pb-20">
-      <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-5 py-3">
-          <div className="flex items-center gap-3">
-            <Button asChild variant="ghost" size="icon" className="h-8 w-8">
-              <Link to={`/jobs/${id}`} aria-label="Back to review">
-                <ArrowLeft className="h-4 w-4" />
-              </Link>
-            </Button>
-            <Clapperboard className="h-4 w-4 text-[var(--primary)]" />
-            <h1 className="text-[14px] font-semibold tracking-tight">
-              Sequence editor
-            </h1>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-muted-foreground">
-            <span>
-              <span className="tabular-nums font-medium text-foreground">{stats.total}</span>{' '}
-              clips
-            </span>
-            <span className="text-muted-foreground/40">·</span>
-            <span>
-              <span className="tabular-nums font-medium text-[var(--success)]">{stats.aroll}</span>{' '}
-              A-roll
-            </span>
-            <span className="text-muted-foreground/40">·</span>
-            <span>
-              <span className="tabular-nums font-medium">{stats.broll}</span> B-roll
-            </span>
-            <span className="text-muted-foreground/40">·</span>
-            <span>
-              <span className="tabular-nums font-medium">{stats.words}</span> words
-            </span>
-            <span className="text-muted-foreground/40">·</span>
-            <span>
-              <span className="tabular-nums font-medium text-[var(--primary)]">{stats.avgConf}%</span>{' '}
-              avg confidence
-            </span>
-          </div>
+    <Shell sidebarTitle="Sequence">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-card px-4 py-2.5">
+        <div className="flex items-center gap-2">
+          <Clapperboard className="h-4 w-4 text-[var(--primary)]" />
+          <h1 className="text-[13px] font-semibold tracking-tight">
+            Sequence editor
+          </h1>
         </div>
-      </header>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-muted-foreground">
+          <span>
+            <span className="tabular-nums font-medium text-foreground">
+              {stats.total}
+            </span>{' '}
+            clips
+          </span>
+          <span>
+            <span className="tabular-nums font-medium text-[var(--success)]">
+              {stats.aroll}
+            </span>{' '}
+            A-roll
+          </span>
+          <span>
+            <span className="tabular-nums font-medium">{stats.broll}</span> B-roll
+          </span>
+          <span>
+            <span className="tabular-nums font-medium">{stats.words}</span> words
+          </span>
+          <span>
+            <span className="tabular-nums font-medium text-[var(--primary)]">
+              {stats.avgConf}%
+            </span>{' '}
+            avg conf
+          </span>
+        </div>
+      </div>
 
-      <main className="mx-auto max-w-6xl px-6 py-8">
+      <main className="min-h-0 flex-1 overflow-auto px-5 py-6">
         {/* Speakers */}
         {data.speaker_tags.length > 0 && (
           <section className="mb-8 rounded-xl border border-border/70 bg-card p-5">
@@ -337,7 +332,7 @@ export default function SequencePage() {
           </div>
         )}
       </main>
-    </div>
+    </Shell>
   )
 }
 

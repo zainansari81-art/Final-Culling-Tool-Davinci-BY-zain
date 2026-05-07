@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  ArrowLeft,
   ChevronLeft,
   ChevronRight,
   Download,
-  FolderOpen,
   ListOrdered,
+  Search,
   Sparkles,
 } from 'lucide-react'
 import { api } from '../api'
@@ -16,18 +15,13 @@ import BackendError from '../components/BackendError'
 import ClipCard from '../components/ClipCard'
 import ExportModal from '../components/ExportModal'
 import ProgressPage from './ProgressPage'
-import {
-  HudFrame,
-  HudPill,
-  HudReadout,
-  HudTitleBar,
-  SegProgress,
-} from '../components/Hud'
+import Shell from '../components/Shell'
 import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
-const PAGE_SIZE = 50
+const PAGE_SIZE = 60
 
 type FilterTab =
   | 'all'
@@ -62,6 +56,7 @@ export default function JobPage() {
   const [showExport, setShowExport] = useState(false)
   const [page, setPage] = useState(0)
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
   const [approveAllState, setApproveAllState] = useState<
     'idle' | 'loading' | 'done'
   >('idle')
@@ -185,8 +180,16 @@ export default function JobPage() {
     if (activeSegments.size > 0) {
       list = list.filter((c) => activeSegments.has(c.suggested_segment))
     }
+    if (query.trim()) {
+      const q = query.trim().toLowerCase()
+      list = list.filter(
+        (c) =>
+          c.filename.toLowerCase().includes(q) ||
+          (c.ai_caption?.toLowerCase().includes(q) ?? false),
+      )
+    }
     return list
-  }, [clips, activeFilter, activeSegments])
+  }, [clips, activeFilter, activeSegments, query])
 
   const totalPages = Math.ceil(filteredClips.length / PAGE_SIZE)
   const pagedClips = filteredClips.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
@@ -225,30 +228,37 @@ export default function JobPage() {
 
   if (backendDown)
     return (
-      <div className="p-6">
-        <BackendError />
-      </div>
+      <Shell hideSidebar>
+        <div className="p-6">
+          <BackendError />
+        </div>
+      </Shell>
     )
 
   if (loading)
     return (
-      <div className="flex min-h-svh items-center justify-center text-[13px] text-muted-foreground">
-        Loading job…
-      </div>
+      <Shell hideSidebar>
+        <div className="flex flex-1 items-center justify-center text-[12.5px] text-muted-foreground">
+          Loading job…
+        </div>
+      </Shell>
     )
 
   if (notFound || !job)
     return (
-      <div className="flex min-h-svh flex-col items-center justify-center gap-3 px-6 text-center">
-        <h2 className="text-base font-semibold tracking-tight">Job not found</h2>
-        <p className="max-w-sm text-[13px] text-muted-foreground">
-          This job is no longer in memory. The backend was likely restarted —
-          jobs aren't persisted to disk yet. Start a new analysis from home.
-        </p>
-        <Button asChild>
-          <Link to="/">Go home</Link>
-        </Button>
-      </div>
+      <Shell hideSidebar>
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+          <h2 className="text-base font-semibold tracking-tight">
+            Job not found
+          </h2>
+          <p className="max-w-sm text-[12.5px] text-muted-foreground">
+            This job is no longer in memory. Backend was likely restarted.
+          </p>
+          <Button asChild>
+            <Link to="/">Go home</Link>
+          </Button>
+        </div>
+      </Shell>
     )
 
   if (job.status === 'running' || job.status === 'queued') {
@@ -258,334 +268,271 @@ export default function JobPage() {
   const folderName = job.folder_path.split('/').filter(Boolean).pop() ?? job.id
   const reviewedPct =
     stats.total > 0 ? ((stats.approved + stats.rejected) / stats.total) * 100 : 0
-  const elapsed = (() => {
-    if (!job.started_at) return null
-    const end = job.completed_at
-      ? new Date(job.completed_at).getTime()
-      : Date.now()
-    const start = new Date(job.started_at).getTime()
-    const sec = Math.max(0, (end - start) / 1000)
-    const m = Math.floor(sec / 60)
-    const s = sec - m * 60
-    return m > 0 ? `${m}m ${s.toFixed(0)}s` : `${s.toFixed(1)}s`
-  })()
+
+  // Sidebar content: filters + segments + shortcuts
+  const sidebar = (
+    <div className="flex flex-col">
+      <Section label="Filter">
+        {FILTER_TABS.map((tab) => {
+          const active = activeFilter === tab.key
+          const count = tabCounts[tab.key]
+          return (
+            <button
+              key={tab.key}
+              onClick={() => {
+                setActiveFilter(tab.key)
+                setPage(0)
+              }}
+              className={cn(
+                'flex items-center justify-between border-l-2 px-3 py-1.5 text-left text-[12px] transition-colors',
+                active
+                  ? 'border-l-[var(--primary)] bg-primary/10 text-foreground'
+                  : 'border-l-transparent text-muted-foreground hover:bg-accent/40 hover:text-foreground',
+              )}
+            >
+              <span>{tab.label}</span>
+              <span
+                className={cn(
+                  'tabular-nums text-[11px]',
+                  active
+                    ? 'text-[var(--primary)]'
+                    : 'text-muted-foreground/70',
+                )}
+              >
+                {count}
+              </span>
+            </button>
+          )
+        })}
+      </Section>
+
+      <Section
+        label="Segments"
+        action={
+          activeSegments.size > 0 && (
+            <button
+              onClick={() => {
+                setActiveSegments(new Set())
+                setPage(0)
+              }}
+              className="text-[10.5px] text-[var(--primary)] hover:underline"
+            >
+              Clear
+            </button>
+          )
+        }
+      >
+        {presentSegments.map((seg) => {
+          const checked = activeSegments.has(seg)
+          const segIdx = SEGMENTS.indexOf(seg)
+          const segColor = `var(--tag-${(segIdx % 8) + 1})`
+          return (
+            <button
+              key={seg}
+              onClick={() => toggleSegment(seg)}
+              className={cn(
+                'flex items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors',
+                checked
+                  ? 'bg-accent/40 text-foreground'
+                  : 'text-muted-foreground hover:bg-accent/30 hover:text-foreground',
+              )}
+            >
+              <span
+                className="h-2 w-2 shrink-0 rounded-sm"
+                style={{ background: segColor }}
+              />
+              <span className="flex-1 truncate">{seg}</span>
+              <span className="tabular-nums text-[11px] text-muted-foreground/70">
+                {segmentCounts[seg] ?? 0}
+              </span>
+            </button>
+          )
+        })}
+        {presentSegments.length === 0 && (
+          <p className="px-3 py-2 text-[11px] text-muted-foreground/70">
+            None yet.
+          </p>
+        )}
+      </Section>
+
+      <Section label="Shortcuts">
+        <div className="grid grid-cols-2 gap-1.5 px-3 py-2 text-[11px]">
+          <Key k="A" v="Approve" />
+          <Key k="R" v="Reject" />
+          <Key k="N" v="Near" />
+          <Key k="1–9" v="Segment" />
+          <Key k="←/→" v="Nav" />
+          <Key k="Space" v="Preview" />
+        </div>
+      </Section>
+    </div>
+  )
 
   return (
-    <div className="min-h-svh">
-      {/* TOP BAR — calm */}
-      <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur-md">
-        <div className="mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-3 px-5 py-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <Button asChild variant="ghost" size="icon" className="h-8 w-8">
-              <Link to="/" aria-label="Back to home">
-                <ArrowLeft className="h-4 w-4" />
-              </Link>
-            </Button>
-            <div
-              className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5"
-              title={job.folder_path}
-            >
-              <FolderOpen className="h-3.5 w-3.5 shrink-0 text-[var(--primary)]" />
-              <span className="truncate text-[13px] font-medium">
-                {folderName}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button asChild variant="outline" size="sm" className="gap-1.5">
-              <Link to={`/jobs/${id}/sequence`}>
-                <ListOrdered className="h-3.5 w-3.5" />
-                Sequence
-              </Link>
-            </Button>
-
-            {approveAllState === 'done' ? (
-              <HudPill tone="success">✓ Done</HudPill>
-            ) : (
-              <button
-                type="button"
-                onClick={handleApproveAll}
-                disabled={approveAllState === 'loading'}
-                className="cta-ghost"
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                {approveAllState === 'loading' ? 'Running…' : 'Auto-approve'}
-              </button>
-            )}
-
-            <button className="cta-primary" onClick={() => setShowExport(true)}>
-              <Download className="h-4 w-4" />
-              Export to Resolve
-            </button>
-          </div>
+    <Shell sidebar={sidebar} sidebarTitle={folderName}>
+      {/* Action bar */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card px-3 py-2">
+        <div className="relative">
+          <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search clips…"
+            className="h-7 w-[200px] pl-7 text-[12px]"
+          />
         </div>
-
-        {/* sub-bar: stats + review progress */}
-        <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-x-8 gap-y-3 border-t border-border/60 px-5 py-3">
-          <HudReadout label="Total" value={stats.total} />
-          <HudReadout
-            label="Approved"
-            value={stats.approved}
-            accent="success"
-          />
-          <HudReadout
-            label="Rejected"
-            value={stats.rejected}
-            accent="destructive"
-          />
-          <HudReadout
-            label="Pending"
-            value={stats.unreviewed}
-            accent="warning"
-          />
-          {elapsed && <HudReadout label="Run time" value={elapsed} />}
-          <div className="flex flex-1 min-w-[220px] items-center gap-3">
-            <span className="text-[11.5px] text-muted-foreground">
-              Review progress
-            </span>
-            <SegProgress value={reviewedPct} className="flex-1" />
-            <span className="text-[12px] tabular-nums font-medium">
+        <div className="flex items-center gap-3 text-[11.5px]">
+          <Stat label="Total" value={stats.total} />
+          <Stat label="Keep" value={stats.approved} tone="success" />
+          <Stat label="Cut" value={stats.rejected} tone="destructive" />
+          <Stat label="Pending" value={stats.unreviewed} tone="warning" />
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <div className="hidden items-center gap-2 md:flex">
+            <span className="text-[11px] text-muted-foreground">Reviewed</span>
+            <div className="smooth-progress w-[120px]">
+              <i style={{ width: `${reviewedPct}%` }} />
+            </div>
+            <span className="text-[11.5px] tabular-nums">
               {Math.round(reviewedPct)}%
             </span>
           </div>
-        </div>
-      </header>
-
-      <div className="mx-auto flex max-w-[1500px] gap-5 px-5 py-6">
-        {/* LEFT RAIL */}
-        <aside className="hidden w-60 shrink-0 flex-col gap-4 lg:flex">
-          {/* filter list */}
-          <HudFrame>
-            <HudTitleBar label="Filter" />
-            <div className="flex flex-col py-1">
-              {FILTER_TABS.map((tab) => {
-                const active = activeFilter === tab.key
-                const count = tabCounts[tab.key]
-                return (
-                  <button
-                    key={tab.key}
-                    onClick={() => {
-                      setActiveFilter(tab.key)
-                      setPage(0)
-                    }}
-                    className={cn(
-                      'mx-1 flex items-center justify-between rounded-md px-2.5 py-1.5 text-left text-[12.5px] transition-colors',
-                      active
-                        ? 'bg-primary/10 text-foreground'
-                        : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
-                    )}
-                  >
-                    <span>{tab.label}</span>
-                    <span
-                      className={cn(
-                        'tabular-nums text-[11.5px]',
-                        active
-                          ? 'text-[var(--primary)]'
-                          : 'text-muted-foreground/70',
-                      )}
-                    >
-                      {count}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-          </HudFrame>
-
-          {/* segments */}
-          <HudFrame>
-            <HudTitleBar
-              label="Segments"
-              meta={
-                presentSegments.length > 0
-                  ? `${presentSegments.length} present`
-                  : undefined
-              }
-            />
-            <div className="flex flex-col py-1">
-              {presentSegments.map((seg) => {
-                const checked = activeSegments.has(seg)
-                const segIdx = SEGMENTS.indexOf(seg)
-                const segColor = `var(--tag-${(segIdx % 8) + 1})`
-                return (
-                  <button
-                    key={seg}
-                    onClick={() => toggleSegment(seg)}
-                    className={cn(
-                      'mx-1 flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12.5px] transition-colors',
-                      checked
-                        ? 'bg-accent/40 text-foreground'
-                        : 'text-muted-foreground hover:bg-accent/30 hover:text-foreground',
-                    )}
-                  >
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ background: segColor }}
-                    />
-                    <span className="flex-1 truncate">{seg}</span>
-                    <span className="tabular-nums text-[11px] text-muted-foreground/70">
-                      {segmentCounts[seg] ?? 0}
-                    </span>
-                  </button>
-                )
-              })}
-              {presentSegments.length === 0 && (
-                <div className="px-3 py-6 text-center text-[12px] text-muted-foreground">
-                  No segments yet.
-                </div>
-              )}
-              {activeSegments.size > 0 && (
-                <button
-                  onClick={() => {
-                    setActiveSegments(new Set())
-                    setPage(0)
-                  }}
-                  className="mx-1 mt-1 rounded-md px-2.5 py-1.5 text-left text-[12px] text-muted-foreground hover:bg-accent/30 hover:text-foreground"
-                >
-                  Clear filter
-                </button>
-              )}
-            </div>
-          </HudFrame>
-
-          {/* hotkeys reference */}
-          <HudFrame>
-            <HudTitleBar label="Shortcuts" />
-            <div className="grid grid-cols-2 gap-2 px-3 py-3 text-[11.5px]">
-              <Key k="A" v="Approve" />
-              <Key k="R" v="Reject" />
-              <Key k="N" v="Near miss" />
-              <Key k="1–9" v="Segment" />
-              <Key k="←/→" v="Navigate" />
-              <Key k="Space" v="Preview" />
-            </div>
-          </HudFrame>
-        </aside>
-
-        {/* MAIN */}
-        <main className="min-w-0 flex-1">
-          {/* mobile filter strip */}
-          <ScrollArea className="mb-3 lg:hidden">
-            <div className="flex gap-1.5 pb-2">
-              {FILTER_TABS.map((tab) => (
-                <button
-                  key={tab.key}
-                  onClick={() => {
-                    setActiveFilter(tab.key)
-                    setPage(0)
-                  }}
-                  className={cn(
-                    'flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-[12px]',
-                    activeFilter === tab.key
-                      ? 'border-primary bg-primary/15 text-[var(--primary)]'
-                      : 'border-border text-muted-foreground',
-                  )}
-                >
-                  {tab.label}
-                  <span className="tabular-nums opacity-70">
-                    {tabCounts[tab.key]}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </ScrollArea>
-
-          {/* result count + paginator */}
-          <div className="mb-4 flex items-center justify-between">
-            <div className="flex items-center gap-3 text-[12px] text-muted-foreground">
-              <span>
-                <span className="tabular-nums font-medium text-foreground">
-                  {filteredClips.length}
-                </span>{' '}
-                clip{filteredClips.length === 1 ? '' : 's'}
-              </span>
-              {activeSegments.size > 0 && (
-                <span className="text-[var(--primary)]">
-                  · {activeSegments.size} segment
-                  {activeSegments.size === 1 ? '' : 's'}
-                </span>
-              )}
-            </div>
-            {totalPages > 1 && (
-              <div className="flex items-center gap-2 text-[12px]">
-                <button
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                  disabled={page === 0}
-                  className="rounded-md border border-border-strong p-1 text-muted-foreground transition-colors hover:border-primary hover:text-[var(--primary)] disabled:opacity-30"
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                </button>
-                <span className="tabular-nums text-muted-foreground">
-                  Page {page + 1} of {totalPages}
-                </span>
-                <button
-                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                  disabled={page >= totalPages - 1}
-                  className="rounded-md border border-border-strong p-1 text-muted-foreground transition-colors hover:border-primary hover:text-[var(--primary)] disabled:opacity-30"
-                >
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )}
-          </div>
-
-          {filteredClips.length === 0 ? (
-            <div className="flex h-64 items-center justify-center rounded-xl border border-dashed border-border bg-muted/15 text-[13px] text-muted-foreground">
-              No clips match the current filter.
-            </div>
+          <Button asChild variant="outline" size="sm" className="h-7 gap-1.5">
+            <Link to={`/jobs/${id}/sequence`}>
+              <ListOrdered className="h-3.5 w-3.5" />
+              Sequence
+            </Link>
+          </Button>
+          {approveAllState === 'done' ? (
+            <Badge variant="secondary" className="bg-success/15 text-[var(--success)]">
+              ✓ Done
+            </Badge>
           ) : (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {pagedClips.map((clip) => (
-                <ClipCard
-                  key={clip.id}
-                  clip={clip}
-                  jobId={id!}
-                  onUpdate={handleClipUpdate}
-                  isSelected={selectedClipId === clip.id}
-                  onSelect={() => setSelectedClipId(clip.id)}
-                />
-              ))}
-            </div>
+            <button
+              type="button"
+              onClick={handleApproveAll}
+              disabled={approveAllState === 'loading'}
+              className="cta-ghost h-7"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              {approveAllState === 'loading' ? 'Running…' : 'Auto-approve'}
+            </button>
           )}
+          <button className="cta-primary h-7" onClick={() => setShowExport(true)}>
+            <Download className="h-3.5 w-3.5" />
+            Export
+          </button>
+        </div>
+      </div>
 
-          {totalPages > 1 && (
-            <div className="mt-6 flex items-center justify-center gap-3 text-[12px]">
-              <button
-                onClick={() => setPage((p) => Math.max(0, p - 1))}
-                disabled={page === 0}
-                className="cta-ghost"
-              >
-                <ChevronLeft className="h-3.5 w-3.5" />
-                Prev
-              </button>
-              <span className="tabular-nums text-muted-foreground">
-                Page {page + 1} of {totalPages}
-              </span>
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                disabled={page >= totalPages - 1}
-                className="cta-ghost"
-              >
-                Next
-                <ChevronRight className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )}
-        </main>
+      {/* Clip grid pane */}
+      <div className="min-h-0 flex-1 overflow-auto bg-background p-3">
+        {filteredClips.length === 0 ? (
+          <div className="flex h-full min-h-[300px] items-center justify-center rounded-md border border-dashed border-border bg-card/40 text-[12.5px] text-muted-foreground">
+            No clips match the current filter.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+            {pagedClips.map((clip) => (
+              <ClipCard
+                key={clip.id}
+                clip={clip}
+                jobId={id!}
+                onUpdate={handleClipUpdate}
+                isSelected={selectedClipId === clip.id}
+                onSelect={() => setSelectedClipId(clip.id)}
+              />
+            ))}
+          </div>
+        )}
+
+        {totalPages > 1 && (
+          <div className="mt-5 flex items-center justify-center gap-2 text-[12px]">
+            <button
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page === 0}
+              className="cta-ghost"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              Prev
+            </button>
+            <span className="tabular-nums text-muted-foreground">
+              Page {page + 1} of {totalPages}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={page >= totalPages - 1}
+              className="cta-ghost"
+            >
+              Next
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
       </div>
 
       {showExport && job && (
         <ExportModal job={job} onClose={() => setShowExport(false)} />
       )}
+    </Shell>
+  )
+}
+
+function Section({
+  label,
+  action,
+  children,
+}: {
+  label: string
+  action?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <div className="border-b border-border">
+      <div className="flex items-center justify-between px-3 py-1.5">
+        <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground/80">
+          {label}
+        </span>
+        {action}
+      </div>
+      <div className="flex flex-col pb-1">{children}</div>
     </div>
+  )
+}
+
+function Stat({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: number
+  tone?: 'success' | 'destructive' | 'warning'
+}) {
+  const toneClass = {
+    success: 'text-[var(--success)]',
+    destructive: 'text-destructive',
+    warning: 'text-[var(--warning)]',
+  } as const
+  return (
+    <span className="flex items-center gap-1">
+      <span className="text-muted-foreground">{label}</span>
+      <span
+        className={cn(
+          'tabular-nums font-medium',
+          tone ? toneClass[tone] : 'text-foreground',
+        )}
+      >
+        {value}
+      </span>
+    </span>
   )
 }
 
 function Key({ k, v }: { k: string; v: string }) {
   return (
-    <div className="flex items-center gap-2">
-      <kbd className="rounded border border-border-strong bg-muted px-1.5 py-0.5 font-mono text-[10.5px] tabular-nums">
+    <div className="flex items-center gap-1.5">
+      <kbd className="rounded-sm border border-border-strong bg-muted px-1.5 py-px font-mono text-[10px] tabular-nums">
         {k}
       </kbd>
       <span className="text-muted-foreground">{v}</span>

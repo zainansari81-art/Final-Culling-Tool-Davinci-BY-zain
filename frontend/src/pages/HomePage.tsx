@@ -3,12 +3,10 @@ import { Link, useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
   Clock,
-  Cpu,
-  Film,
   FolderOpen,
   Loader2,
   Play,
-  Sparkles,
+  Plus,
   Wand2,
 } from 'lucide-react'
 import { api, type AiInfo } from '../api'
@@ -18,18 +16,17 @@ import FolderBrowser from '../components/FolderBrowser'
 import LocalWarmupCard from '../components/LocalWarmupCard'
 import OnboardingWizard from '../components/OnboardingWizard'
 import LogPane from '../components/LogPane'
-import {
-  HudFrame,
-  HudPill,
-  HudReadout,
-  HudTitleBar,
-  SegProgress,
-} from '../components/Hud'
+import Shell from '../components/Shell'
 import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
+} from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
-
-type WizardStep = 'pick' | 'analyzing' | 'review'
 
 const formatDate = (iso?: string) => {
   if (!iso) return ''
@@ -52,14 +49,13 @@ export default function HomePage() {
   const [backendDown, setBackendDown] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const [openStep, setOpenStep] = useState<WizardStep>('pick')
-
   const [folderPath, setFolderPath] = useState('')
   const [includedFiles, setIncludedFiles] = useState<string[] | null>(null)
   const [selectedCount, setSelectedCount] = useState(0)
   const [activeJob, setActiveJob] = useState<AnalysisJob | null>(null)
   const [enableAi, setEnableAi] = useState(false)
   const [aiInfo, setAiInfo] = useState<AiInfo | null>(null)
+  const [newSessionOpen, setNewSessionOpen] = useState(false)
 
   const loadJobs = async () => {
     try {
@@ -86,8 +82,8 @@ export default function HomePage() {
         const fresh = await api.getJob(activeJob.id)
         setActiveJob(fresh)
         if (fresh.status === 'done') {
-          setOpenStep('review')
           loadJobs()
+          navigate(`/jobs/${fresh.id}`)
         }
       } catch {
         // retry
@@ -95,7 +91,7 @@ export default function HomePage() {
     }
     const t = setInterval(tick, 1500)
     return () => clearInterval(t)
-  }, [activeJob])
+  }, [activeJob, navigate])
 
   const handleAnalyze = async () => {
     if (!folderPath || selectedCount === 0) return
@@ -108,7 +104,8 @@ export default function HomePage() {
         enable_ai: enableAi,
       })
       setActiveJob(job)
-      setOpenStep('analyzing')
+      setNewSessionOpen(false)
+      navigate(`/jobs/${job.id}`)
     } catch (err: unknown) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const detail = (err as any)?.response?.data?.detail
@@ -120,359 +117,255 @@ export default function HomePage() {
     }
   }
 
-  const recentJobs = useMemo(() => jobs.slice(0, 6), [jobs])
+  const recentJobs = useMemo(() => jobs.slice(0, 8), [jobs])
 
   if (backendDown) {
     return (
-      <div className="min-h-svh p-6">
-        <BackendError />
-      </div>
+      <Shell hideSidebar>
+        <div className="p-6">
+          <BackendError />
+        </div>
+      </Shell>
     )
   }
 
-  const pickActive = openStep === 'pick' && !activeJob
-  const analyzeActive = !!activeJob && activeJob.status !== 'done'
-  const reviewReady = activeJob?.status === 'done'
+  // Sidebar content: Recent jobs list (compact)
+  const sidebar = (
+    <div className="flex flex-col">
+      <div className="px-3 pt-3 pb-2">
+        <button
+          className="cta-primary w-full"
+          onClick={() => setNewSessionOpen(true)}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          New session
+        </button>
+      </div>
+      <div className="px-3 pb-2 text-[10.5px] uppercase tracking-wider text-muted-foreground/80">
+        Recent
+      </div>
+      <div className="flex flex-col">
+        {loadingJobs && (
+          <div className="space-y-2 px-3 pb-3">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+        )}
+        {!loadingJobs && recentJobs.length === 0 && (
+          <p className="px-3 pb-3 text-[12px] text-muted-foreground">
+            No jobs yet.
+          </p>
+        )}
+        {recentJobs.map((j) => (
+          <SidebarJobItem key={j.id} job={j} />
+        ))}
+      </div>
+    </div>
+  )
 
   return (
-    <div className="min-h-svh">
-      <TopBar aiInfo={aiInfo} />
+    <Shell sidebar={sidebar} sidebarTitle="Library">
+      {aiInfo?.backend === 'cloud' && !aiInfo.has_key && (
+        <div className="border-b border-border bg-card px-4 py-3">
+          <OnboardingWizard
+            onDone={() => {
+              api.aiInfo().then(setAiInfo).catch(() => {})
+            }}
+          />
+        </div>
+      )}
 
-      <main className="mx-auto max-w-[1400px] px-6 pb-16 pt-8">
-        {/* hero */}
-        <div className="mb-8">
-          <h1 className="text-[26px] font-semibold tracking-tight">
-            Cull a folder
-          </h1>
-          <p className="mt-1 max-w-xl text-[13.5px] text-muted-foreground">
-            Pick the folder of clips, run analysis, then review the picks
-            and send them to Resolve.
-          </p>
+      <div className="min-h-0 flex-1 overflow-auto">
+        {/* Hero / start panel */}
+        <div className="border-b border-border bg-card">
+          <div className="mx-auto max-w-3xl px-5 py-8">
+            <h1 className="text-[20px] font-semibold tracking-tight">
+              Library
+            </h1>
+            <p className="mt-1 text-[12.5px] text-muted-foreground">
+              Pick a folder of clips. Cull scores them, finds duplicates, and
+              hands ranked selects to Resolve.
+            </p>
+            <div className="mt-4 flex items-center gap-2">
+              <button
+                className="cta-primary"
+                onClick={() => setNewSessionOpen(true)}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                New session
+              </button>
+              <span className="text-[12px] text-muted-foreground">
+                or pick a recent job
+              </span>
+            </div>
+          </div>
         </div>
 
         {aiInfo?.backend === 'local' && (
-          <div className="mb-4">
+          <div className="border-b border-border bg-card/40 px-5 py-3">
             <LocalWarmupCard />
           </div>
         )}
 
-        {aiInfo?.backend === 'cloud' && !aiInfo.has_key && (
-          <div className="mb-4">
-            <OnboardingWizard
-              onDone={() => {
-                api.aiInfo().then(setAiInfo).catch(() => {})
-              }}
-            />
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr,1fr]">
-          {/* LEFT: pipeline */}
-          <div className="flex flex-col gap-5">
-            {/* STEP 1 — PICK FOLDER */}
-            <HudFrame state={pickActive ? 'active' : activeJob ? 'done' : 'idle'}>
-              <HudTitleBar
-                index={1}
-                label="Pick a folder"
-                status={
-                  pickActive
-                    ? 'Choose your card or footage folder'
-                    : 'Locked while analysis runs'
-                }
-                meta={
-                  folderPath ? (
-                    <span className="truncate font-mono">{folderPath}</span>
-                  ) : null
-                }
-              />
-              <div className="grid grid-cols-1 gap-0 lg:grid-cols-[1fr,280px]">
-                <div className="border-b border-border lg:border-b-0 lg:border-r">
-                  <FolderBrowser
-                    onSelectionChange={(p, files, count) => {
-                      setFolderPath(p)
-                      setIncludedFiles(files)
-                      setSelectedCount(count)
-                    }}
-                  />
-                </div>
-                <div className="flex flex-col gap-0">
-                  <label className="flex cursor-pointer items-start gap-3 border-b border-border px-4 py-3 transition-colors hover:bg-accent/30">
-                    <Switch
-                      checked={enableAi}
-                      onCheckedChange={setEnableAi}
-                      disabled={submitting}
-                      className="mt-0.5"
-                    />
-                    <div className="flex-1">
-                      <div className="flex items-center gap-1.5 text-[13px] font-medium">
-                        <Wand2 className="h-3.5 w-3.5 text-[var(--primary)]" />
-                        Use AI analysis
-                      </div>
-                      <p className="mt-0.5 text-[12px] leading-snug text-muted-foreground">
-                        {aiInfo?.backend === 'local'
-                          ? 'Runs locally on this Mac. Adds captions, segments, and quality scores.'
-                          : 'Uses Vertex Gemini. Adds captions, segments, quality, and trim suggestions (~30s/clip).'}
-                      </p>
-                    </div>
-                  </label>
-
-                  <div className="grid grid-cols-2 gap-4 border-b border-border px-4 py-3">
-                    <HudReadout
-                      label="Selected"
-                      value={selectedCount}
-                      hint={
-                        selectedCount === 0
-                          ? 'No clips yet'
-                          : selectedCount === 1
-                            ? '1 clip'
-                            : `${selectedCount} clips`
-                      }
-                      accent={selectedCount > 0 ? 'primary' : 'default'}
-                    />
-                    <HudReadout
-                      label="Mode"
-                      value={enableAi ? 'AI + checks' : 'Quick checks'}
-                      hint={enableAi ? 'Smarter, slower' : 'Fast, no AI'}
-                      align="right"
-                    />
-                  </div>
-
-                  <button
-                    onClick={handleAnalyze}
-                    disabled={selectedCount === 0 || submitting}
-                    className="cta-primary m-4"
-                  >
-                    {submitting ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Starting…
-                      </>
-                    ) : (
-                      <>
-                        <Play className="h-4 w-4 fill-current" />
-                        Run analysis
-                      </>
-                    )}
-                  </button>
-                  {error && (
-                    <div className="border-t border-destructive/40 bg-destructive/10 px-4 py-2 text-[12px] text-destructive">
-                      {error}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </HudFrame>
-
-            {/* STEP 2 — ANALYZE */}
-            <HudFrame
-              state={
-                analyzeActive
-                  ? 'active'
-                  : activeJob?.status === 'done'
-                    ? 'done'
-                    : 'pending'
-              }
-            >
-              <HudTitleBar
-                index={2}
-                label="Analyze clips"
-                status={
-                  !activeJob
-                    ? 'Waiting'
-                    : activeJob.status === 'done'
-                      ? 'Done'
-                      : `Running · ${Math.round(activeJob.progress)}%`
-                }
-              />
-              {!activeJob ? (
-                <div className="flex flex-col items-center justify-center px-4 py-12 text-center">
-                  <p className="max-w-md text-[13px] text-muted-foreground">
-                    We score every clip for shake, blur, and exposure, then
-                    group duplicates. This kicks in when you run analysis.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-5 px-5 py-5">
-                  <SegProgress
-                    value={activeJob.progress}
-                    variant={
-                      activeJob.status === 'done' ? 'success' : 'primary'
-                    }
-                  />
-                  <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
-                    <HudReadout
-                      label="Progress"
-                      value={`${Math.round(activeJob.progress)}%`}
-                      accent="primary"
-                    />
-                    <HudReadout
-                      label="Clips found"
-                      value={activeJob.clips.length || selectedCount}
-                    />
-                    <HudReadout
-                      label="Status"
-                      value={
-                        activeJob.status === 'done'
-                          ? 'Done'
-                          : activeJob.status === 'failed'
-                            ? 'Failed'
-                            : 'Running'
-                      }
-                      accent={
-                        activeJob.status === 'failed'
-                          ? 'destructive'
-                          : activeJob.status === 'done'
-                            ? 'success'
-                            : 'primary'
-                      }
-                    />
-                    <HudReadout
-                      label="Folder"
-                      value={folderPath.split('/').pop() || '—'}
-                      align="right"
-                    />
-                  </div>
-
-                  {activeJob.status === 'failed' && activeJob.error && (
-                    <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
-                      {activeJob.error}
-                    </div>
-                  )}
-
-                  <LogPane
-                    jobId={activeJob.id}
-                    active={
-                      activeJob.status === 'running' ||
-                      activeJob.status === 'queued'
-                    }
-                  />
-                </div>
-              )}
-            </HudFrame>
-
-            {/* STEP 3 — REVIEW */}
-            <HudFrame state={reviewReady ? 'active' : 'pending'}>
-              <HudTitleBar
-                index={3}
-                label="Review &amp; export"
-                status={
-                  reviewReady
-                    ? `${activeJob.clips.length} clips ready`
-                    : 'Available after analysis'
-                }
-              />
-              {reviewReady ? (
-                <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-5">
-                  <div className="text-[13px] text-muted-foreground">
-                    Approve the keepers, mark a few near-misses, and send the
-                    selects to Resolve or FCPXML.
-                  </div>
-                  <button
-                    className="cta-primary"
-                    onClick={() => navigate(`/jobs/${activeJob.id}`)}
-                  >
-                    Open review
-                    <ArrowRight className="h-4 w-4" />
-                  </button>
-                </div>
-              ) : (
-                <div className="px-5 py-7 text-center">
-                  <p className="text-[13px] text-muted-foreground">
-                    Once analysis finishes, you'll review and approve clips here.
-                  </p>
-                </div>
-              )}
-            </HudFrame>
-          </div>
-
-          {/* RIGHT: recent jobs sidebar */}
-          <div className="flex flex-col gap-5">
-            <HudFrame>
-              <HudTitleBar
-                label="Recent jobs"
-                meta={`${jobs.length} total`}
-              />
-              <div className="divide-y divide-border">
-                {loadingJobs && (
-                  <div className="space-y-2 p-3">
-                    <Skeleton className="h-12 w-full" />
-                    <Skeleton className="h-12 w-full" />
-                    <Skeleton className="h-12 w-full" />
-                  </div>
-                )}
-                {!loadingJobs && recentJobs.length === 0 && (
-                  <div className="px-4 py-8 text-center text-[12.5px] text-muted-foreground">
-                    No jobs yet. Pick a folder to start.
-                  </div>
-                )}
-                {recentJobs.map((j) => (
-                  <JobRow key={j.id} job={j} />
-                ))}
-              </div>
-            </HudFrame>
-
-            <HudFrame>
-              <HudTitleBar label="System" />
-              <div className="grid grid-cols-2 gap-4 px-4 py-3">
-                <HudReadout
-                  label="Backend"
-                  value={
-                    aiInfo?.backend
-                      ? aiInfo.backend === 'local'
-                        ? 'Local'
-                        : 'Cloud'
-                      : 'Offline'
-                  }
-                  accent={aiInfo ? 'success' : 'destructive'}
-                />
-                <HudReadout
-                  label="Engine"
-                  value={aiInfo?.label ?? '—'}
-                  align="right"
-                />
-              </div>
-              <div className="border-t border-border bg-muted/30 px-4 py-2 text-[11.5px] text-muted-foreground">
-                <span className="text-success">●</span> Online · v1.0
-              </div>
-            </HudFrame>
-          </div>
-        </div>
-      </main>
-    </div>
-  )
-}
-
-function TopBar({ aiInfo }: { aiInfo: AiInfo | null }) {
-  return (
-    <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur-md">
-      <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-6 py-3">
-        <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-gradient-to-br from-primary to-[color-mix(in_srgb,var(--primary)_70%,#c2410c)] text-primary-foreground shadow-[0_0_18px_-4px_color-mix(in_srgb,var(--primary)_70%,transparent)]">
-            <Film className="h-4 w-4" />
-          </div>
-          <div className="flex flex-col leading-tight">
-            <span className="text-[14px] font-semibold tracking-tight">Cull</span>
-            <span className="text-[10.5px] text-muted-foreground">
-              for DaVinci Resolve
+        {/* Recent jobs grid */}
+        <div className="mx-auto max-w-6xl px-5 py-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-[13px] font-semibold">Recent jobs</h2>
+            <span className="text-[11.5px] text-muted-foreground">
+              {jobs.length} total
             </span>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <HudPill tone={aiInfo ? 'success' : 'destructive'}>
-            <Cpu className="h-3 w-3" />
-            {aiInfo
-              ? aiInfo.backend === 'local'
-                ? 'Local'
-                : 'Cloud'
-              : 'Offline'}
-          </HudPill>
+
+          {loadingJobs && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-20 w-full" />
+            </div>
+          )}
+
+          {!loadingJobs && jobs.length === 0 && (
+            <div className="flex h-40 items-center justify-center rounded-md border border-dashed border-border bg-card/40 text-[12.5px] text-muted-foreground">
+              No jobs yet. Start a new session to begin.
+            </div>
+          )}
+
+          {!loadingJobs && jobs.length > 0 && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {jobs.map((j) => (
+                <JobCard key={j.id} job={j} />
+              ))}
+            </div>
+          )}
         </div>
       </div>
-    </header>
+
+      {/* New session sheet — slides in from right */}
+      <Sheet open={newSessionOpen} onOpenChange={setNewSessionOpen}>
+        <SheetContent side="right" width="min(640px, 92vw)" className="p-0">
+          <SheetTitle className="sr-only">New session</SheetTitle>
+          <div className="titlebar">
+            <span className="text-foreground">New session</span>
+            <span>Pick folder → run analysis</span>
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <FolderBrowser
+                onSelectionChange={(p, files, count) => {
+                  setFolderPath(p)
+                  setIncludedFiles(files)
+                  setSelectedCount(count)
+                }}
+              />
+            </div>
+            <div className="border-t border-border bg-card">
+              <label className="flex cursor-pointer items-start gap-3 border-b border-border px-4 py-3 transition-colors hover:bg-accent/30">
+                <Switch
+                  checked={enableAi}
+                  onCheckedChange={setEnableAi}
+                  disabled={submitting}
+                  className="mt-0.5"
+                />
+                <div className="flex-1">
+                  <div className="flex items-center gap-1.5 text-[12.5px] font-medium">
+                    <Wand2 className="h-3.5 w-3.5 text-[var(--primary)]" />
+                    Use AI analysis
+                  </div>
+                  <p className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground">
+                    {aiInfo?.backend === 'local'
+                      ? 'Runs locally. Adds captions, segments, quality scores.'
+                      : 'Uses Vertex Gemini (~30s/clip). Adds captions, segments, quality, trim suggestions.'}
+                  </p>
+                </div>
+              </label>
+
+              <div className="flex items-center justify-between gap-3 px-4 py-3">
+                <div className="text-[12px] text-muted-foreground">
+                  {selectedCount > 0 ? (
+                    <>
+                      <span className="font-medium tabular-nums text-foreground">
+                        {selectedCount}
+                      </span>{' '}
+                      clip{selectedCount === 1 ? '' : 's'} selected
+                      {enableAi ? ' · AI on' : ''}
+                    </>
+                  ) : (
+                    'Select at least one clip to continue.'
+                  )}
+                </div>
+                <button
+                  onClick={handleAnalyze}
+                  disabled={selectedCount === 0 || submitting}
+                  className="cta-primary"
+                >
+                  {submitting ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Starting…
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-3.5 w-3.5 fill-current" />
+                      Run analysis
+                    </>
+                  )}
+                </button>
+              </div>
+              {error && (
+                <div className="border-t border-destructive/40 bg-destructive/10 px-4 py-2 text-[12px] text-destructive">
+                  {error}
+                </div>
+              )}
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* If a job is mid-analysis but user is on Library, show a floating ribbon */}
+      {activeJob &&
+        activeJob.status !== 'done' &&
+        activeJob.status !== 'failed' && (
+          <Link
+            to={`/jobs/${activeJob.id}`}
+            className="absolute bottom-3 right-3 z-20 flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 shadow-lg hover:border-primary"
+          >
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--primary)]" />
+            <span className="text-[12px]">
+              Analyzing · {Math.round(activeJob.progress)}%
+            </span>
+            <ArrowRight className="h-3 w-3 text-muted-foreground" />
+          </Link>
+        )}
+
+      {/* Active job analysis logs (full-screen takeover) */}
+      {activeJob &&
+        activeJob.status !== 'done' &&
+        activeJob.status !== 'failed' && (
+          <Sheet open onOpenChange={() => {}}>
+            <SheetContent
+              side="bottom"
+              className="h-[60vh] border-t"
+              showClose={false}
+            >
+              <SheetTitle className="sr-only">Analysis progress</SheetTitle>
+              <div className="titlebar">
+                <span className="text-foreground">
+                  Analyzing · {Math.round(activeJob.progress)}%
+                </span>
+                <span>{activeJob.clips.length} clips processed</span>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto p-3">
+                <LogPane jobId={activeJob.id} active />
+              </div>
+            </SheetContent>
+          </Sheet>
+        )}
+    </Shell>
   )
 }
 
-function JobRow({ job }: { job: AnalysisJob }) {
+function SidebarJobItem({ job }: { job: AnalysisJob }) {
   const isActive = job.status === 'running' || job.status === 'queued'
   const tone =
     job.status === 'done'
@@ -482,6 +375,37 @@ function JobRow({ job }: { job: AnalysisJob }) {
         : isActive
           ? 'primary'
           : 'default'
+  return (
+    <Link
+      to={`/jobs/${job.id}`}
+      className="block px-3 py-2 transition-colors hover:bg-accent/40"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <FolderOpen className="h-3 w-3 shrink-0 text-muted-foreground" />
+          <span className="truncate text-[12px] font-medium">
+            {job.folder_path.split('/').pop() || job.folder_path}
+          </span>
+        </div>
+        <Tone tone={tone} />
+      </div>
+      <div className="mt-0.5 flex items-center justify-between text-[10.5px] text-muted-foreground/80">
+        <span>{formatDate(job.created_at)}</span>
+        {isActive && (
+          <span className="tabular-nums">{Math.round(job.progress)}%</span>
+        )}
+      </div>
+      {isActive && (
+        <div className="smooth-progress mt-1.5">
+          <i style={{ width: `${job.progress}%` }} />
+        </div>
+      )}
+    </Link>
+  )
+}
+
+function JobCard({ job }: { job: AnalysisJob }) {
+  const isActive = job.status === 'running' || job.status === 'queued'
   const elapsed = (() => {
     if (!job.started_at) return null
     const end = job.completed_at
@@ -504,16 +428,31 @@ function JobRow({ job }: { job: AnalysisJob }) {
   return (
     <Link
       to={`/jobs/${job.id}`}
-      className="block px-4 py-3 transition-colors hover:bg-accent/30"
+      className={cn(
+        'panel flex flex-col gap-2 p-3 transition-colors hover:border-primary/50 hover:bg-card',
+      )}
     >
-      <div className="mb-1 flex items-center justify-between gap-2">
+      <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <span className="truncate text-[12.5px] font-medium">
+          <span
+            className="truncate text-[13px] font-medium"
+            title={job.folder_path}
+          >
             {job.folder_path.split('/').pop() || job.folder_path}
           </span>
         </div>
-        <HudPill tone={tone}>{label}</HudPill>
+        <Badge
+          variant="secondary"
+          className={cn(
+            'rounded-sm px-1.5 py-0 text-[10.5px]',
+            job.status === 'done' && 'bg-success/15 text-[var(--success)]',
+            job.status === 'failed' && 'bg-destructive/15 text-destructive',
+            isActive && 'bg-primary/15 text-[var(--primary)]',
+          )}
+        >
+          {label}
+        </Badge>
       </div>
       <div className="flex items-center justify-between text-[11px] text-muted-foreground">
         <span className="flex items-center gap-1">
@@ -522,11 +461,27 @@ function JobRow({ job }: { job: AnalysisJob }) {
         </span>
         {elapsed && <span className="tabular-nums">{elapsed}</span>}
       </div>
-      {isActive && <SegProgress value={job.progress} className={cn('mt-2')} />}
+      {isActive && (
+        <div className="smooth-progress">
+          <i style={{ width: `${job.progress}%` }} />
+        </div>
+      )}
+      {job.status === 'done' && (
+        <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
+          <span>{job.clips?.length ?? 0} clips</span>
+          <span className="text-[var(--primary)]">Open →</span>
+        </div>
+      )}
     </Link>
   )
 }
 
-// keep tree-shaker friendly
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const _keep = { Sparkles }
+function Tone({ tone }: { tone: 'success' | 'destructive' | 'primary' | 'default' }) {
+  const cls = {
+    success: 'bg-success',
+    destructive: 'bg-destructive',
+    primary: 'bg-primary',
+    default: 'bg-muted-foreground/50',
+  }[tone]
+  return <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', cls)} />
+}
