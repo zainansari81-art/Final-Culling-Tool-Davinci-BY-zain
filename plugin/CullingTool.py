@@ -12,18 +12,14 @@ Stdlib only — runs in Resolve's bundled Python.
 
 from __future__ import annotations
 
-import json
 import os
 import platform
 import subprocess
 import sys
 import time
-import tkinter as tk
-import urllib.error
 import urllib.request
 import webbrowser
 from pathlib import Path
-from tkinter import messagebox
 from typing import List, Optional
 
 BACKEND_HOST = "127.0.0.1"
@@ -63,8 +59,13 @@ def _candidate_repo_roots() -> List[Path]:
         except Exception:  # noqa: BLE001
             pass
     # Three levels up from this script's install location (best effort).
-    here = Path(__file__).resolve().parent
-    cands.append(here.parent.parent.parent)
+    # Resolve runs scripts via exec() in a context WITHOUT __file__, so
+    # this lookup is wrapped to never raise.
+    try:
+        here = Path(__file__).resolve().parent
+        cands.append(here.parent.parent.parent)
+    except NameError:
+        pass
     # Dev fallback.
     cands.append(Path("/Users/Shared/Final-Culling-Tool-Davinci-BY-zain"))
     return cands
@@ -137,14 +138,40 @@ def _spawn_detached(cmd: List[str], cwd: Path) -> None:
         )
 
 
-# ─────────────────────────── Tk error dialog ────────────────────────────────
+# ─────────────────────────── Error dialog (graceful fallback) ───────────────
 
 def _err_dialog(msg: str) -> None:
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-    messagebox.showerror("CullingTool", msg)
-    root.destroy()
+    """Show a Tk dialog when tkinter is available, otherwise log to
+    stderr (visible in Resolve's Console pane) AND open a fallback
+    HTML page in the browser so the user actually sees the message."""
+    print(f"\n[CullingTool ERROR]\n{msg}\n", file=sys.stderr)
+    try:
+        import tkinter as _tk
+        from tkinter import messagebox as _mb
+        root = _tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        _mb.showerror("CullingTool", msg)
+        root.destroy()
+    except Exception:  # noqa: BLE001
+        # tkinter not bundled with this Python (e.g. brew Python 3.12).
+        # Write the message to a temp HTML file and open it so the user
+        # sees something even when no GUI toolkit is available.
+        try:
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            err_file = CACHE_DIR / "last_error.html"
+            err_file.write_text(
+                "<!doctype html><meta charset='utf-8'>"
+                "<title>CullingTool error</title>"
+                "<body style='font:14px -apple-system,sans-serif;"
+                "padding:32px;background:#111;color:#eee'>"
+                "<h2 style='color:#ff6e00'>CullingTool error</h2>"
+                f"<pre style='white-space:pre-wrap'>{msg}</pre>"
+                "</body>"
+            )
+            webbrowser.open(err_file.as_uri())
+        except Exception:  # noqa: BLE001
+            pass
 
 
 # ─────────────────────────── Main ───────────────────────────────────────────
