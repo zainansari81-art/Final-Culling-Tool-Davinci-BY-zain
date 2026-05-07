@@ -1,7 +1,20 @@
 import axios from 'axios'
 import type { AnalysisJob, ClipResult, CreateJobRequest, UpdateClipRequest } from './types'
 
-export const BASE_URL = 'http://localhost:8000'
+// When the frontend is served by FastAPI (production / Resolve flow on :8000)
+// use a same-origin BASE_URL so the browser doesn't fire CORS preflights and
+// then block the request. In Vite dev (port 5173) the page origin isn't the
+// API, so fall back to the explicit localhost:8000 — main.py CORS allow-list
+// covers that case.
+export const BASE_URL = (() => {
+  if (typeof window === 'undefined' || !window.location.protocol.startsWith('http')) {
+    return 'http://localhost:8000'
+  }
+  if (window.location.port === '5173') {
+    return 'http://localhost:8000'
+  }
+  return window.location.origin
+})()
 
 const client = axios.create({
   baseURL: BASE_URL,
