@@ -789,6 +789,49 @@ def approve_all(job_id: str) -> Dict[str, Any]:
     return {"approved": approved, "rejected": rejected, "total": len(job.clips)}
 
 
+# ─────────────────────────── Resolve plugin bridge ──────────────────────────
+
+class ResolvePushBody(BaseModel):
+    """POST /jobs/{job_id}/resolve/push payload.
+
+    mode='new_timeline' (default) creates a new timeline named after the
+    job. mode='append' appends to the active timeline if one exists.
+    """
+    mode: str = "new_timeline"
+    include_near_miss: bool = True
+    include_rejected: bool = False
+
+
+@app.post(
+    "/jobs/{job_id}/resolve/push",
+    summary="Push job results into the user's currently open Resolve project",
+)
+def resolve_push(job_id: str, body: ResolvePushBody) -> Dict[str, Any]:
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != JobStatus.done:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Job is not done yet (status={job.status}).",
+        )
+    try:
+        import resolve_bridge
+        return resolve_bridge.push_job(
+            job,
+            mode=body.mode,
+            include_near_miss=body.include_near_miss,
+            include_rejected=body.include_rejected,
+        )
+    except RuntimeError as exc:
+        # Lazy bridge errors (Resolve not running, no project, scripting
+        # disabled) — surface verbatim, they're already user-facing.
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Resolve push failed for job %s: %s", job_id, exc)
+        raise HTTPException(status_code=500, detail=f"Resolve push failed: {exc}")
+
+
 # ─────────────────────────── Export — Resolve ────────────────────────────────
 
 @app.post(
