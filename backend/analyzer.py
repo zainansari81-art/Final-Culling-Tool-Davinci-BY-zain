@@ -7,11 +7,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -21,7 +23,21 @@ import imagehash
 import numpy as np
 from PIL import Image
 
-from models import AnalysisJob, ClipReview, ClipScore, JobStatus
+from models import (
+    AnalysisJob,
+    ClipReview,
+    ClipScore,
+    JobStatus,
+    LabelInfo,
+    ShotInfo,
+    WordInfo,
+)
+
+
+def _ai_enabled() -> bool:
+    """AI is always on now — kept as a function so future opt-out can
+    flip the rule without touching every call site."""
+    return True
 
 logger = logging.getLogger(__name__)
 
@@ -282,6 +298,29 @@ def save_thumbnail(frame: np.ndarray, job_id: str, clip_id: str) -> str:
     return str(out_path)
 
 
+def save_ai_keyframes(
+    frames: List[np.ndarray], job_id: str, clip_id: str, max_frames: int = 8,
+) -> List[str]:
+    """Save evenly-spaced keyframes at 768px width for Gemini. Returns paths."""
+    if not frames:
+        return []
+    out_dir = THUMBNAILS_ROOT / job_id / "ai" / clip_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths: List[str] = []
+    n = len(frames)
+    step = max(1, n // max_frames)
+    selected = frames[::step][:max_frames]
+    for i, frame in enumerate(selected):
+        h, w = frame.shape[:2]
+        if w > 768:
+            new_h = int(h * (768 / w))
+            frame = cv2.resize(frame, (768, new_h), interpolation=cv2.INTER_AREA)
+        p = out_dir / f"{i:02d}.jpg"
+        cv2.imwrite(str(p), frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        paths.append(str(p))
+    return paths
+
+
 # ─────────────────────────── Per-clip pipeline ──────────────────────────────
 
 def analyze_single_clip(file_path: str, job_id: str) -> ClipReview:
@@ -289,6 +328,8 @@ def analyze_single_clip(file_path: str, job_id: str) -> ClipReview:
     Full analysis pipeline for one video file.
     Designed to be called inside a thread-pool worker.
     """
+    import time
+    _t0 = time.monotonic()
     clip_id = str(uuid.uuid4())
     filename = Path(file_path).name
 
@@ -305,9 +346,12 @@ def analyze_single_clip(file_path: str, job_id: str) -> ClipReview:
 
     # Middle keyframe → thumbnail
     thumbnail_path: Optional[str] = None
+    ai_keyframes: List[str] = []
     if frames:
         mid_frame = frames[len(frames) // 2]
         thumbnail_path = save_thumbnail(mid_frame, job_id, clip_id)
+        if _ai_enabled():
+            ai_keyframes = save_ai_keyframes(frames, job_id, clip_id)
 
     scores = ClipScore(
         path=file_path,
@@ -319,16 +363,351 @@ def analyze_single_clip(file_path: str, job_id: str) -> ClipReview:
         scene_count=scene_count,
     )
 
+    # ─── AI pipeline (opt-in) ────────────────────────────────────────────
+    if _ai_enabled() and ai_keyframes:
+        try:
+            scores = _run_ai_pipeline(
+                file_path=file_path,
+                duration_sec=duration,
+                shake_score=shake_score,
+                blur_score=blur_score,
+                exposure_ok=exposure_ok,
+                ai_keyframes=ai_keyframes,
+                scores=scores,
+                job_id=job_id,
+                clip_id=clip_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("AI pipeline failed for %s: %s", filename, exc)
+
+    # Prefer AI segment over filename regex when available
+    final_segment = scores.ai_segment or suggested_segment
+
+    # Auto-approve based on AI judgement so the timeline isn't empty by
+    # default. User can still flip individual clips in the review UI.
+    # Trust the AI's skip/segment decision over the per-clip quality
+    # number, which Qwen2-VL 2B tends to underestimate. Only quality 0
+    # combined with no useful segment is enough to reject automatically.
+    # Tiny clips (<2 s) are almost always test footage or a fumbled
+    # record-stop. Reject regardless of AI judgement.
+    if duration < 2.0:
+        approved_default = False
+        scores.ai_reasoning.append(
+            f"Auto-reject: duration {duration:.2f}s under 2.0s minimum (likely camera fumble)."
+        )
+    elif scores.ai_segment is not None:
+        ai_quality = scores.ai_quality if scores.ai_quality is not None else 5.0
+        if scores.ai_skip:
+            approved_default = False
+            scores.ai_reasoning.append(
+                f"Auto-reject: AI skip=true ({scores.ai_skip_reason or 'no reason given'})."
+            )
+        elif scores.ai_segment == "Backup":
+            approved_default = False
+            scores.ai_reasoning.append(
+                "Auto-reject: segment=Backup (test footage / unusable)."
+            )
+        elif ai_quality < 3.0:
+            approved_default = False
+            scores.ai_reasoning.append(
+                f"Auto-reject: AI quality {ai_quality:.1f}/10 below 3.0 threshold."
+            )
+        else:
+            approved_default = True
+            scores.ai_reasoning.append(
+                f"Auto-approve: segment={scores.ai_segment}, "
+                f"quality {ai_quality:.1f}/10, not skipped, duration {duration:.1f}s."
+            )
+    else:
+        approved_default = (
+            shake_score < 0.5 and blur_score < 0.85 and exposure_ok
+        )
+        scores.ai_reasoning.append(
+            f"No AI segment — heuristic verdict {approved_default} "
+            f"(shake={shake_score:.2f}, blur={blur_score:.2f}, exposure_ok={exposure_ok})."
+        )
+
+    scores.analysis_sec = round(time.monotonic() - _t0, 3)
     return ClipReview(
         clip_id=clip_id,
         path=file_path,
         filename=filename,
         thumbnail_path=thumbnail_path,
         scores=scores,
-        suggested_segment=suggested_segment,
-        approved=False,
-        segment_label=suggested_segment,
+        suggested_segment=final_segment,
+        approved=approved_default,
+        segment_label=final_segment,
     )
+
+
+def _run_ai_pipeline(
+    file_path: str,
+    duration_sec: float,
+    shake_score: float,
+    blur_score: float,
+    exposure_ok: bool,
+    ai_keyframes: List[str],
+    scores: ClipScore,
+    job_id: str,
+    clip_id: str,
+) -> ClipScore:
+    """Run AI video analysis + VLM synthesis via the configured backend.
+    Mutates and returns scores."""
+    import ai_backend
+
+    fname = Path(file_path).name
+    logger.info("AI: video analysis for %s", fname)
+    vi_result = ai_backend.analyze_video(
+        file_path, cleanup=True, keyframe_paths=ai_keyframes,
+    )
+
+    if vi_result:
+        scores.transcript = vi_result.get("transcript") or None
+        scores.shots = [
+            ShotInfo(start_sec=s["start_sec"], end_sec=s["end_sec"])
+            for s in vi_result.get("shots", [])
+        ]
+        scores.labels = [
+            LabelInfo(
+                label=l["label"],
+                confidence=l["confidence"],
+                start_sec=l["start_sec"],
+                end_sec=l["end_sec"],
+            )
+            for l in vi_result.get("labels", [])
+        ]
+        word_dicts = vi_result.get("words") or []
+        scores.words = [
+            WordInfo(
+                word=w["word"],
+                start_sec=w["start_sec"],
+                end_sec=w["end_sec"],
+                speaker_tag=w.get("speaker_tag"),
+            )
+            for w in word_dicts
+        ]
+
+    # ─── Whisper fallback when Vertex didn't transcribe ───────────────────
+    # Common reasons Vertex misses speech: non-English audio, multi-track
+    # source where speech isn't on track 0, heavy music, certain codecs.
+    # Whisper handles all of these much more reliably.
+    if not scores.words:
+        try:
+            import whisper_transcribe
+            wh = whisper_transcribe.transcribe(file_path)
+            if wh and wh.get("words"):
+                scores.words = [
+                    WordInfo(
+                        word=w["word"],
+                        start_sec=w["start_sec"],
+                        end_sec=w["end_sec"],
+                        speaker_tag=w.get("speaker_tag"),
+                    )
+                    for w in wh["words"]
+                ]
+                if not scores.transcript:
+                    scores.transcript = wh.get("transcript")
+                logger.info(
+                    "Whisper fallback recovered %d words for %s",
+                    len(scores.words), fname,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Whisper fallback failed for %s: %s", fname, exc)
+
+    logger.info("AI: VLM synthesis for %s", fname)
+    decision = ai_backend.synthesize(
+        keyframe_jpeg_paths=ai_keyframes,
+        duration_sec=duration_sec,
+        shake_score=shake_score,
+        blur_score=blur_score,
+        exposure_ok=exposure_ok,
+        video_intel=vi_result,
+    )
+
+    if decision:
+        scores.ai_segment = decision.get("segment")
+        scores.ai_moment = decision.get("moment")
+        scores.ai_caption = decision.get("caption")
+        scores.ai_rationale = decision.get("rationale") or None
+        q = decision.get("quality")
+        if isinstance(q, (int, float)):
+            scores.ai_quality = float(q)
+        scores.ai_subjects = list(decision.get("subjects") or [])
+        scores.ai_skip = bool(decision.get("skip", False))
+        scores.ai_skip_reason = decision.get("skip_reason")
+        in_s = decision.get("in_sec")
+        out_s = decision.get("out_sec")
+        scores.ai_in_sec = float(in_s) if isinstance(in_s, (int, float)) else None
+        scores.ai_out_sec = float(out_s) if isinstance(out_s, (int, float)) else None
+        # Fold the VLM's reasoning bullets (Qwen initial / audit / CLIP
+        # override) into the per-clip trace so the UI can show them.
+        vlm_reasoning = decision.get("_reasoning") or []
+        if isinstance(vlm_reasoning, list):
+            scores.ai_reasoning.extend(str(r) for r in vlm_reasoning)
+
+    # ─── Stability + dense-feature trim (Phase 1b) ───────────────────────
+    # Pulls one motion sample per second via dense_features.extract_dense
+    # and feeds the resulting array directly into stability_trim, giving
+    # 2x finer granularity than the keyframe path. Audio RMS is also
+    # captured here for future archetype scoring (Phase 1c+).
+    try:
+        import dense_features
+        import stability_trim
+        dense = dense_features.extract_dense(file_path)
+        if dense is None:
+            raise RuntimeError("dense_features returned None")
+        stab = stability_trim.compute_stability_trim_from_motion(
+            motion=dense.motion,
+            duration_sec=duration_sec,
+            interval_sec=1.0 / dense.sample_hz,
+        )
+        scores.needs_stabilization = stab.needs_stabilization
+        if not stab.needs_stabilization and stab.in_sec is not None:
+            scores.ai_in_sec = stab.in_sec
+            scores.ai_out_sec = stab.out_sec
+            logger.info(
+                "Stability trim %s: %.2fs–%.2fs (longest steady run %.1fs, %d motion samples)",
+                fname, stab.in_sec, stab.out_sec, stab.longest_stable_sec, len(dense.motion),
+            )
+            scores.ai_reasoning.append(
+                f"Stability trim: {stab.in_sec:.2f}s–{stab.out_sec:.2f}s "
+                f"(longest steady run {stab.longest_stable_sec:.1f}s, {len(dense.motion)} samples)"
+            )
+        elif stab.needs_stabilization:
+            logger.info(
+                "%s flagged Needs Stabilization (longest steady run %.1fs, %d motion samples)",
+                fname, stab.longest_stable_sec, len(dense.motion),
+            )
+            scores.ai_reasoning.append(
+                f"Needs Stabilization (longest steady run only {stab.longest_stable_sec:.1f}s, "
+                f"under 1.5s threshold)"
+            )
+        # ─── Archetype-aware trim refinement (Phase 1c) ──────────────────
+        # Stability picked the longest steady run; this picks the steady
+        # run that best matches the AI segment's signature (audio peak
+        # for First Look, speech density for Ceremony/Toasts, etc.).
+        if (
+            not stab.needs_stabilization
+            and dense is not None
+            and scores.ai_segment
+        ):
+            try:
+                import archetypes
+                states = stab.states
+                runs = stability_trim.enumerate_keep_runs(
+                    states,
+                    interval_sec=1.0 / dense.sample_hz,
+                )
+                if runs:
+                    word_dicts = [
+                        {
+                            "word": w.word,
+                            "start_sec": w.start_sec,
+                            "end_sec": w.end_sec,
+                            "speaker_tag": w.speaker_tag,
+                        }
+                        for w in scores.words
+                    ]
+                    signal = archetypes.DenseSignal(
+                        motion=dense.motion,
+                        audio_rms=dense.audio_rms,
+                        words=word_dicts,
+                        duration_sec=dense.duration_sec,
+                        sample_hz=dense.sample_hz,
+                    )
+                    refined = archetypes.refine_trim(
+                        segment=scores.ai_segment,
+                        candidate_windows=runs,
+                        signal=signal,
+                    )
+                    if refined is not None:
+                        new_in, new_out, score = refined
+                        if (new_in, new_out) != (stab.in_sec, stab.out_sec):
+                            logger.info(
+                                "Archetype refine [%s] %s: %.2fs–%.2fs → %.2fs–%.2fs (score=%.3f)",
+                                scores.ai_segment, fname,
+                                stab.in_sec, stab.out_sec, new_in, new_out, score,
+                            )
+                            scores.ai_in_sec = new_in
+                            scores.ai_out_sec = new_out
+                            scores.ai_reasoning.append(
+                                f"Archetype refine [{scores.ai_segment}]: "
+                                f"{stab.in_sec:.2f}s–{stab.out_sec:.2f}s → "
+                                f"{new_in:.2f}s–{new_out:.2f}s (score {score:.3f})"
+                            )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Archetype refine failed for %s: %s", fname, exc)
+        # Persist dense features as a sidecar so archetype scorers can
+        # consume them later without re-decoding the video. Pin to an
+        # absolute path next to this module so the location is stable
+        # regardless of which directory uvicorn was launched from.
+        try:
+            features_dir = Path(__file__).resolve().parent / "jobs" / job_id / "features"
+            features_dir.mkdir(parents=True, exist_ok=True)
+            (features_dir / f"{clip_id}.json").write_text(
+                json.dumps(dense.to_dict()),
+            )
+        except Exception as persist_exc:  # noqa: BLE001
+            logger.debug("dense feature persist failed for %s: %s", fname, persist_exc)
+    except Exception as exc:  # noqa: BLE001
+        # Couldn't judge stability — assume the worst so dialogue trim
+        # below also bails. Better to keep the whole clip than mis-trim
+        # a shaky one based on incidental speech.
+        scores.needs_stabilization = True
+        logger.warning("Stability trim failed for %s: %s", fname, exc)
+        scores.ai_reasoning.append(
+            f"Stability/dense pipeline failed: {exc}. Assumed needs_stabilization."
+        )
+
+    # ─── Clip type classification (AROLL vs BROLL) ────────────────────────
+    # AROLL only when speech is genuinely the subject of the clip:
+    #   - the AI segment is a dialogue-driven moment, OR
+    #   - the speech spans ≥40% of the clip duration AND ≥8 words.
+    # Anything else (a B-roll dress shot with one stray background sentence)
+    # stays BROLL so dialogue trim doesn't collapse it to a 2 s window.
+    DIALOGUE_SEGMENTS = {"Ceremony", "Toasts", "Reception / First Dance"}
+    is_dialogue_segment = scores.ai_segment in DIALOGUE_SEGMENTS
+    if scores.words:
+        speech_span = max(w.end_sec for w in scores.words) - min(
+            w.start_sec for w in scores.words
+        )
+        speech_density = speech_span / duration_sec if duration_sec > 0 else 0
+    else:
+        speech_density = 0.0
+    scores.clip_type = (
+        "AROLL"
+        if scores.words
+        and (
+            is_dialogue_segment
+            or (len(scores.words) >= 8 and speech_density >= 0.4)
+        )
+        else "BROLL"
+    )
+
+    # ─── Dialogue-aware trim — only when AROLL AND speech is the subject ──
+    # Stability trim above already set in/out for visual moments. Dialogue
+    # trim only takes over for AROLL clips that ALSO weren't flagged as
+    # needing stabilization (a shaky speech clip is unusable anyway).
+    if (
+        scores.clip_type == "AROLL"
+        and scores.words
+        and not scores.needs_stabilization
+    ):
+        import dialogue_trim
+        word_dicts = [
+            {"word": w.word, "start_sec": w.start_sec, "end_sec": w.end_sec}
+            for w in scores.words
+        ]
+        trim = dialogue_trim.trim_to_dialogue(word_dicts, duration_sec)
+        if trim is not None:
+            scores.ai_in_sec, scores.ai_out_sec = trim
+            scores.dialogue_trimmed = True
+            logger.info(
+                "Dialogue trim %s [%s]: %.2fs–%.2fs (%d words)",
+                fname, scores.clip_type, trim[0], trim[1], len(scores.words),
+            )
+
+    return scores
 
 
 # ─────────────────────────── Job runner ─────────────────────────────────────
@@ -358,6 +737,7 @@ def analyze_folder(
     """
     job = jobs_store[job_id]
     job.status = JobStatus.running
+    job.started_at = datetime.utcnow()
     jobs_store[job_id] = job
 
     try:
@@ -376,6 +756,7 @@ def analyze_folder(
         if total == 0:
             logger.warning("No video files found in %s", folder_path)
             job.status = JobStatus.done
+            job.completed_at = datetime.utcnow()
             job.progress = 100.0
             jobs_store[job_id] = job
             return
@@ -446,8 +827,25 @@ def analyze_folder(
                 dup_count += 1
         logger.info("Found %d duplicate(s)", dup_count)
 
+        # ── Restore deterministic order ────────────────────────────────────
+        # ThreadPoolExecutor as_completed() yields results out of order; sort
+        # by source path so C0001.MP4 comes before C0010.MP4 by default.
+        clip_results.sort(key=lambda c: c.path.lower())
+
+        # ── Cross-clip ranking via configured AI backend ──────────────────
+        if _ai_enabled():
+            try:
+                import ai_backend
+                job.progress = 98.0
+                jobs_store[job_id] = job
+                n = ai_backend.rerank_job(clip_results)
+                logger.info("AI ranked %d segment group(s)", n)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Cross-clip ranking failed: %s", exc)
+
         job.clips = clip_results
         job.status = JobStatus.done
+        job.completed_at = datetime.utcnow()
         job.progress = 100.0
         jobs_store[job_id] = job
         logger.info("Done — %d clip(s) processed", len(clip_results))
@@ -455,5 +853,6 @@ def analyze_folder(
     except Exception as exc:  # noqa: BLE001
         logger.exception("Job %s failed: %s", job_id, exc)
         job.status = JobStatus.failed
+        job.completed_at = datetime.utcnow()
         job.error = str(exc)
         jobs_store[job_id] = job

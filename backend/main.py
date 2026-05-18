@@ -9,18 +9,20 @@
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Deque, Dict, List
+from typing import Any, Deque, Dict, List, Optional
 
 import re
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
 
 from analyzer import SUPPORTED_EXTENSIONS, analyze_folder
 from fcpxml_export import export_to_fcpxml
@@ -34,6 +36,7 @@ from models import (
     JobStatus,
     ResolveExportRequest,
     UpdateClipRequest,
+    UpdateSpeakerNamesRequest,
 )
 
 # ─────────────────────────── Logging ────────────────────────────────────────
@@ -57,6 +60,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -84,8 +89,14 @@ class JobLogHandler(logging.Handler):
         job_logs[self.job_id].append(line)
 
 
-def _run_job(job_id: str, folder_path: str, included_files: List[str] | None) -> None:
-    """Wrapper that attaches a per-job log handler before running analysis."""
+def _run_job(
+    job_id: str,
+    folder_path: str,
+    included_files: List[str] | None,
+    enable_ai: bool = True,  # kept for back-compat; AI is always on now
+) -> None:
+    """Wrapper that attaches a per-job log handler before running analysis.
+    AI runs unconditionally — analyzer._ai_enabled returns True always."""
     handler = JobLogHandler(job_id)
     handler.setLevel(logging.INFO)
     analyzer_logger = logging.getLogger("analyzer")
@@ -108,9 +119,316 @@ _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="culling")
 
 # ─────────────────────────── Health check ───────────────────────────────────
 
-@app.get("/", summary="Health check")
+@app.get("/healthz", summary="Health check")
 def health_check() -> Dict[str, str]:
+    # Moved off "/" so the StaticFiles mount at the bottom of this file
+    # can serve the React frontend's index.html when frontend/dist exists.
     return {"status": "ok", "service": "wedding-culling-tool"}
+
+
+# ─────────────────────────── Local model warmup ─────────────────────────────
+
+WARMUP_LOG_KEY = "__warmup__"
+_warmup_state: Dict[str, Any] = {"running": False, "done": False, "error": None}
+
+
+def _hf_cache_path(repo_id: str) -> Path:
+    """Return the snapshot dir HF would use for a repo, if cached."""
+    home = Path(os.path.expanduser("~"))
+    base = Path(os.environ.get("HF_HOME", home / ".cache" / "huggingface"))
+    safe = "models--" + repo_id.replace("/", "--")
+    return base / "hub" / safe
+
+
+def _local_models_status() -> Dict[str, Any]:
+    vlm_repo = os.environ.get(
+        "LOCAL_VLM_MODEL", "mlx-community/Qwen2-VL-2B-Instruct-4bit",
+    )
+    clip_model = os.environ.get("LOCAL_CLIP_MODEL", "ViT-B-32")
+    clip_pre = os.environ.get("LOCAL_CLIP_PRETRAINED", "openai")
+    # open_clip caches under ~/.cache/clip or HF hub, hard to detect cleanly;
+    # treat "ever loaded once" via in-process flag as the signal too.
+    vlm_dir = _hf_cache_path(vlm_repo)
+    return {
+        "vlm_model": vlm_repo,
+        "clip_model": f"{clip_model}/{clip_pre}",
+        "vlm_cached": vlm_dir.exists() and any(vlm_dir.rglob("*.safetensors")),
+        "clip_cached": _warmup_state.get("clip_loaded", False),
+        "running": _warmup_state["running"],
+        "done": _warmup_state["done"],
+        "error": _warmup_state["error"],
+    }
+
+
+def _run_warmup() -> None:
+    handler = JobLogHandler(WARMUP_LOG_KEY)
+    handler.setLevel(logging.INFO)
+    analyzer_logger = logging.getLogger("analyzer")
+    analyzer_logger.addHandler(handler)
+    job_logs[WARMUP_LOG_KEY].append(
+        f"{datetime.now().strftime('%H:%M:%S')} I Local model warmup started"
+    )
+    _warmup_state["running"] = True
+    _warmup_state["done"] = False
+    _warmup_state["error"] = None
+    try:
+        import local_vlm
+        import local_video
+        local_vlm._load_model()
+        local_video._load_clip()
+        _warmup_state["clip_loaded"] = True
+        _warmup_state["done"] = True
+        job_logs[WARMUP_LOG_KEY].append(
+            f"{datetime.now().strftime('%H:%M:%S')} I Warmup complete — both models cached"
+        )
+    except Exception as exc:  # noqa: BLE001
+        _warmup_state["error"] = str(exc)
+        job_logs[WARMUP_LOG_KEY].append(
+            f"{datetime.now().strftime('%H:%M:%S')} E Warmup failed: {exc}"
+        )
+    finally:
+        _warmup_state["running"] = False
+        analyzer_logger.removeHandler(handler)
+
+
+@app.post("/ai/local/warmup", summary="Pre-download Qwen2-VL and CLIP")
+def warmup_local() -> Dict[str, Any]:
+    if _warmup_state["running"]:
+        return {"status": "already_running"}
+    _executor.submit(_run_warmup)
+    return {"status": "started"}
+
+
+@app.get("/ai/local/status", summary="Local model cache status")
+def local_status() -> Dict[str, Any]:
+    return _local_models_status()
+
+
+@app.get("/ai/local/logs", summary="Local warmup logs")
+def warmup_logs(since: int = 0) -> Dict[str, Any]:
+    buf = job_logs.get(WARMUP_LOG_KEY)
+    lines = list(buf) if buf else []
+    total = len(lines)
+    new_lines = lines[since:] if since < total else []
+    return {"lines": new_lines, "total": total}
+
+
+# ─────────────────────────── Cloud onboarding ───────────────────────────────
+
+
+class CloudKeyBody(BaseModel):
+    """Gemini AI Studio onboarding payload."""
+    api_key: str
+
+
+class VertexCredsBody(BaseModel):
+    """Vertex onboarding payload."""
+    project_id: str
+    region: str = "us-central1"
+    service_account_json: str
+
+
+class ProviderSelectBody(BaseModel):
+    provider: str  # "gemini" | "vertex"
+
+
+def _scrub_google_error(exc: Exception) -> str:
+    """Translate google-genai / google-auth errors into safe user-facing
+    strings. Never echo raw exception text — auth failures have been
+    seen to embed the key/secret."""
+    name = type(exc).__name__
+    msg = str(exc)
+    if "401" in msg or "PermissionDenied" in name or "INVALID_ARGUMENT" in msg:
+        return "Credential rejected by Google. Double-check the key / service account."
+    if "ConnectError" in name or "Timeout" in name or "Network" in name:
+        return "Couldn't reach Google. Check your internet connection."
+    if "DefaultCredentialsError" in name or "RefreshError" in name:
+        return "Service-account JSON couldn't authenticate. Confirm it's the full unmodified file from GCP."
+    if "404" in msg and "project" in msg.lower():
+        return "Project not found or Vertex AI API not enabled in that project."
+    return f"Validation failed ({name}). See server logs for details."
+
+
+@app.get("/onboarding/status", summary="Cloud onboarding status")
+def onboarding_status() -> Dict[str, Any]:
+    import cloud_credentials
+    provider = cloud_credentials.get_active_provider()
+    return {
+        "active_provider": provider,
+        "has_credentials": cloud_credentials.has_any_credentials(),
+        "providers": {
+            "gemini": {"has_key": cloud_credentials.has_gemini_api_key()},
+            "vertex": {"has_creds": cloud_credentials.has_vertex_credentials()},
+        },
+    }
+
+
+@app.post("/onboarding/select", summary="Set the active provider")
+def onboarding_select(body: ProviderSelectBody) -> Dict[str, Any]:
+    import cloud_credentials
+    if body.provider not in ("gemini", "vertex"):
+        raise HTTPException(status_code=400, detail="provider must be 'gemini' or 'vertex'")
+    cloud_credentials.set_active_provider(body.provider)
+    return {"ok": True, "provider": body.provider}
+
+
+# ── Gemini AI Studio paths ──
+
+@app.post("/onboarding/test", summary="Validate a Gemini API key without saving")
+def onboarding_test(body: CloudKeyBody) -> Dict[str, Any]:
+    import cloud_credentials
+    key = body.api_key.strip()
+    if not cloud_credentials.looks_like_gemini_key(key):
+        return {"ok": False, "error": "That doesn't look like a Google AI Studio key. They start with 'AIza' and are at least 30 characters."}
+    try:
+        from google import genai
+        client = genai.Client(api_key=key)
+        list(client.models.list())
+        return {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("onboarding_test (gemini) failed: %s: %s", type(exc).__name__, exc)
+        return {"ok": False, "error": _scrub_google_error(exc)}
+
+
+@app.post("/onboarding/save", summary="Persist a validated Gemini API key")
+def onboarding_save(body: CloudKeyBody) -> Dict[str, Any]:
+    import cloud_credentials
+    key = body.api_key.strip()
+    if not cloud_credentials.looks_like_gemini_key(key):
+        raise HTTPException(status_code=400, detail="API key shape invalid")
+    cloud_credentials.save_gemini_api_key(key)
+    cloud_credentials.set_active_provider("gemini")
+    return {"ok": True, "provider": "gemini"}
+
+
+# ── Vertex paths ──
+
+@app.post("/onboarding/vertex/test", summary="Validate Vertex credentials without saving")
+def onboarding_vertex_test(body: VertexCredsBody) -> Dict[str, Any]:
+    import cloud_credentials
+    project_id = body.project_id.strip()
+    region = (body.region or "us-central1").strip()
+    sa_json = body.service_account_json
+    if not project_id:
+        return {"ok": False, "error": "Project ID is required."}
+    if not cloud_credentials.looks_like_service_account_json(sa_json):
+        return {"ok": False, "error": "Service-account JSON looks malformed. Paste the FULL JSON file from GCP IAM."}
+    # Materialize into a temp env without persisting to keychain yet.
+    import os as _os
+    import tempfile
+    tmp_path: Optional[str] = None
+    prev_creds = _os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    prev_project = _os.environ.get("GCP_PROJECT")
+    prev_location = _os.environ.get("GCP_LOCATION")
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            f.write(sa_json)
+            tmp_path = f.name
+        _os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = tmp_path
+        _os.environ["GCP_PROJECT"] = project_id
+        _os.environ["GCP_LOCATION"] = region
+        from google import genai
+        client = genai.Client(vertexai=True, project=project_id, location=region)
+        # Real network call — fails immediately on bad creds / disabled API.
+        list(client.models.list())
+        return {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("onboarding_test (vertex) failed: %s: %s", type(exc).__name__, exc)
+        return {"ok": False, "error": _scrub_google_error(exc)}
+    finally:
+        # Always restore env exactly and unlink the temp file, even on
+        # early exceptions before genai got a chance to run.
+        if prev_creds is not None:
+            _os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = prev_creds
+        else:
+            _os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        if prev_project is not None:
+            _os.environ["GCP_PROJECT"] = prev_project
+        else:
+            _os.environ.pop("GCP_PROJECT", None)
+        if prev_location is not None:
+            _os.environ["GCP_LOCATION"] = prev_location
+        else:
+            _os.environ.pop("GCP_LOCATION", None)
+        if tmp_path is not None:
+            try:
+                _os.unlink(tmp_path)
+            except Exception:  # noqa: BLE001
+                pass
+
+
+@app.post("/onboarding/vertex/save", summary="Persist validated Vertex credentials")
+def onboarding_vertex_save(body: VertexCredsBody) -> Dict[str, Any]:
+    import cloud_credentials
+    project_id = body.project_id.strip()
+    region = (body.region or "us-central1").strip()
+    sa_json = body.service_account_json
+    if not project_id:
+        raise HTTPException(status_code=400, detail="project_id required")
+    if not cloud_credentials.looks_like_service_account_json(sa_json):
+        raise HTTPException(status_code=400, detail="service_account_json malformed")
+    cloud_credentials.save_vertex_credentials(project_id, region, sa_json)
+    cloud_credentials.set_active_provider("vertex")
+    cloud_credentials.ensure_vertex_env_loaded()  # warm env so first job doesn't pay the cold path
+    return {"ok": True, "provider": "vertex", "project_id": project_id, "region": region}
+
+
+# ── Reset ──
+
+@app.delete("/onboarding/key", summary="Remove the stored Gemini API key (legacy)")
+def onboarding_delete() -> Dict[str, Any]:
+    import cloud_credentials
+    removed = cloud_credentials.delete_gemini_api_key()
+    return {"removed": removed}
+
+
+@app.delete("/onboarding/all", summary="Wipe every stored cloud credential")
+def onboarding_delete_all() -> Dict[str, Any]:
+    import cloud_credentials
+    cloud_credentials.clear_all()
+    return {"ok": True}
+
+
+@app.get("/ai/info", summary="Active AI backend info")
+def ai_info() -> Dict[str, Any]:
+    import os as _os
+    import ai_backend
+    import cloud_credentials
+    backend = ai_backend.BACKEND
+    if backend == "local":
+        return {
+            "backend": "local",
+            "label": "Local (MLX)",
+            "vlm_model": _os.environ.get(
+                "LOCAL_VLM_MODEL", "mlx-community/Qwen2.5-VL-3B-Instruct-4bit",
+            ),
+            "clip_model": _os.environ.get("LOCAL_CLIP_MODEL", "ViT-B-32"),
+            "has_key": True,
+        }
+    if backend == "cloud":
+        provider = cloud_credentials.get_active_provider()
+        if provider == "vertex":
+            label = "Cloud (Vertex + Gemini)"
+            has_key = cloud_credentials.has_vertex_credentials()
+        else:
+            # default = gemini AI Studio (also when nothing selected yet)
+            label = "Cloud (Gemini · AI Studio)"
+            has_key = cloud_credentials.has_gemini_api_key()
+        return {
+            "backend": "cloud",
+            "provider": provider or "gemini",
+            "label": label,
+            "vlm_model": _os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+            "clip_model": None,
+            "has_key": has_key,
+        }
+    return {
+        "backend": "vertex",
+        "label": "Cloud (Vertex)",
+        "vlm_model": _os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+        "clip_model": None,
+        "has_key": True,
+    }
 
 
 # ─────────────────────────── Jobs ────────────────────────────────────────────
@@ -151,12 +469,62 @@ def create_job(body: CreateJobRequest) -> AnalysisJob:
     jobs[job.id] = job
 
     _executor.submit(
-        _run_job, job.id, job.folder_path, body.included_files,
+        _run_job, job.id, job.folder_path, body.included_files, body.enable_ai,
     )
     logger.info(
         "Created job %s for %s (included_files=%s)",
         job.id, job.folder_path,
         len(body.included_files) if body.included_files else "all",
+    )
+    return job
+
+
+# ─────────────────────────── Job — from explicit paths ──────────────────────
+
+class FromPathsBody(BaseModel):
+    """POST /jobs/from-paths payload — used by the Resolve plugin to push the
+    Media Pool's clip list directly without a folder picker."""
+    paths: List[str]
+    source_name: Optional[str] = None  # e.g. Resolve project name for display
+
+
+@app.post(
+    "/jobs/from-paths",
+    response_model=AnalysisJob,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a job from a list of file paths (e.g. Resolve Media Pool scan)",
+)
+def create_job_from_paths(body: FromPathsBody) -> AnalysisJob:
+    valid = [p for p in body.paths if p and Path(p).is_file()]
+    if not valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No valid file paths in payload.",
+        )
+    # Pick the deepest common directory so the existing analyzer flow
+    # (which keys per-job state by folder_path) still works. Falls back to
+    # the parent of the first file when there's no shared prefix.
+    try:
+        common = os.path.commonpath(valid)
+        if not Path(common).is_dir():
+            common = str(Path(valid[0]).parent)
+    except ValueError:
+        common = str(Path(valid[0]).parent)
+
+    job_label = body.source_name or Path(common).name or "Resolve Media Pool"
+    job = AnalysisJob(
+        id=str(uuid.uuid4()),
+        folder_path=common,
+        created_at=datetime.utcnow(),
+    )
+    jobs[job.id] = job
+
+    _executor.submit(
+        _run_job, job.id, common, valid, True,
+    )
+    logger.info(
+        "Created from-paths job %s (%s, %d files) — common=%s",
+        job.id, job_label, len(valid), common,
     )
     return job
 
@@ -248,6 +616,58 @@ def get_logs(job_id: str, since: int = 0) -> Dict[str, Any]:
     return {"lines": new_lines, "total": total}
 
 
+@app.get(
+    "/jobs/{job_id}/ai-debug",
+    summary="What did AI extract for this job? Quick visibility into pipeline output.",
+)
+def ai_debug(job_id: str) -> Dict[str, Any]:
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    clips = []
+    n_with_words = 0
+    n_with_seq = 0
+    n_dialogue_trimmed = 0
+    for c in job.clips:
+        s = c.scores
+        word_count = len(s.words or [])
+        if word_count > 0:
+            n_with_words += 1
+        if s.sequence_position is not None:
+            n_with_seq += 1
+        if s.dialogue_trimmed:
+            n_dialogue_trimmed += 1
+        clips.append({
+            "clip_id": c.clip_id,
+            "filename": c.filename,
+            "duration_sec": s.duration_sec,
+            "ai_segment": s.ai_segment,
+            "ai_quality": s.ai_quality,
+            "ai_caption": s.ai_caption,
+            "ai_in_sec": s.ai_in_sec,
+            "ai_out_sec": s.ai_out_sec,
+            "dialogue_trimmed": s.dialogue_trimmed,
+            "word_count": word_count,
+            "transcript_chars": len(s.transcript or ""),
+            "rank_in_group": s.rank_in_group,
+            "sequence_position": s.sequence_position,
+            "approved": c.approved,
+        })
+
+    return {
+        "job_id": job_id,
+        "ai_ran": any(c["ai_quality"] is not None for c in clips),
+        "summary": {
+            "total_clips": len(clips),
+            "clips_with_words": n_with_words,
+            "clips_dialogue_trimmed": n_dialogue_trimmed,
+            "clips_with_sequence_pos": n_with_seq,
+        },
+        "clips": clips,
+    }
+
+
 # ─────────────────────────── Clip updates ────────────────────────────────────
 
 @app.patch(
@@ -270,11 +690,123 @@ def update_clip(
 
     if body.approved is not None:
         clip.approved = body.approved
+    if body.near_miss is not None:
+        clip.near_miss = body.near_miss
     if body.segment_label is not None:
         clip.segment_label = body.segment_label
+    if body.sequence_position is not None:
+        clip.scores.sequence_position = max(1, int(body.sequence_position))
+    if body.ai_in_sec is not None:
+        clip.scores.ai_in_sec = max(0.0, float(body.ai_in_sec))
+    if body.ai_out_sec is not None:
+        clip.scores.ai_out_sec = max(
+            (clip.scores.ai_in_sec or 0.0) + 0.1,
+            float(body.ai_out_sec),
+        )
 
     jobs[job_id] = job
     return clip
+
+
+# ─────────────────────────── Speaker names ───────────────────────────────────
+
+@app.get(
+    "/jobs/{job_id}/speakers",
+    summary="Read speaker name mapping for this job",
+)
+def get_speakers(job_id: str) -> Dict[str, str]:
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job.speaker_names
+
+
+@app.put(
+    "/jobs/{job_id}/speakers",
+    summary="Replace speaker name mapping (e.g. 'speaker_1' -> 'John')",
+)
+def put_speakers(
+    job_id: str, body: UpdateSpeakerNamesRequest,
+) -> Dict[str, str]:
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job.speaker_names = body.speaker_names
+    jobs[job_id] = job
+    return job.speaker_names
+
+
+# ─────────────────────────── Sequence transcript ─────────────────────────────
+
+@app.get(
+    "/jobs/{job_id}/sequence",
+    summary="Whole-job sequence: clips in timeline order with transcripts",
+)
+def get_sequence(job_id: str) -> Dict[str, Any]:
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    items: list[Dict[str, Any]] = []
+    detected_speakers: set[int] = set()
+
+    # Order: by segment chronology, then sequence_position within
+    from fcpxml_export import SEGMENT_ORDER as _SEG_ORDER
+
+    def seg_index(seg: str) -> int:
+        try:
+            return _SEG_ORDER.index(seg)
+        except ValueError:
+            return len(_SEG_ORDER)
+
+    sorted_clips = sorted(
+        job.clips,
+        key=lambda c: (
+            seg_index(c.segment_label or "Backup"),
+            c.scores.sequence_position if c.scores.sequence_position is not None else 1_000_000,
+            c.path.lower(),
+        ),
+    )
+
+    for i, c in enumerate(sorted_clips, start=1):
+        s = c.scores
+        words_payload = []
+        for w in (s.words or []):
+            if w.speaker_tag:
+                detected_speakers.add(w.speaker_tag)
+            words_payload.append({
+                "word": w.word,
+                "start_sec": w.start_sec,
+                "end_sec": w.end_sec,
+                "speaker_tag": w.speaker_tag,
+            })
+        items.append({
+            "clip_id": c.clip_id,
+            "filename": c.filename,
+            "segment": c.segment_label,
+            "clip_type": s.clip_type,
+            "duration_sec": s.duration_sec,
+            "ai_in_sec": s.ai_in_sec,
+            "ai_out_sec": s.ai_out_sec,
+            "ai_quality": s.ai_quality,
+            "ai_caption": s.ai_caption,
+            "transcript": s.transcript,
+            "words": words_payload,
+            "sequence_position": s.sequence_position,
+            "placement_confidence": s.placement_confidence,
+            "approved": c.approved,
+            "rank_in_group": s.rank_in_group,
+            "thumbnail_url": f"/thumbnails/{job.id}/{c.clip_id}",
+            "stream_url": f"/clips/{job.id}/{c.clip_id}",
+            "timeline_position": i,
+        })
+
+    return {
+        "job_id": job.id,
+        "speaker_tags": sorted(detected_speakers),
+        "speaker_names": job.speaker_names,
+        "items": items,
+    }
 
 
 # ─────────────────────────── Bulk auto-approve ───────────────────────────────
@@ -289,7 +821,19 @@ def approve_all(job_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="Job not found")
     approved = rejected = 0
     for clip in job.clips:
-        good = clip.scores.shake_score < 0.4 and clip.scores.blur_score < 0.4 and clip.scores.exposure_ok
+        s = clip.scores
+        # AI is authoritative when it ran. Heuristics often misjudge cinematic
+        # footage (gimbal moves register as "shaky", shallow DoF as "blurry"),
+        # so we trust Gemini's quality + skip when present.
+        if s.ai_quality is not None:
+            good = (not s.ai_skip) and (s.ai_quality >= 5.0)
+        else:
+            # Looser fallback thresholds when AI didn't run
+            good = (
+                s.shake_score < 0.5
+                and s.blur_score < 0.85
+                and s.exposure_ok
+            )
         clip.approved = good
         if good:
             approved += 1
@@ -297,6 +841,65 @@ def approve_all(job_id: str) -> Dict[str, Any]:
             rejected += 1
     jobs[job_id] = job
     return {"approved": approved, "rejected": rejected, "total": len(job.clips)}
+
+
+# ─────────────────────────── Resolve plugin bridge ──────────────────────────
+
+
+@app.get(
+    "/resolve/media-pool",
+    summary="List video clips from the active Resolve project's Media Pool",
+)
+def resolve_media_pool() -> Dict[str, Any]:
+    try:
+        import resolve_bridge
+        return resolve_bridge.list_media_pool()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("resolve_media_pool failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Media pool scan failed: {exc}")
+
+
+class ResolvePushBody(BaseModel):
+    """POST /jobs/{job_id}/resolve/push payload.
+
+    mode='new_timeline' (default) creates a new timeline named after the
+    job. mode='append' appends to the active timeline if one exists.
+    """
+    mode: str = "new_timeline"
+    include_near_miss: bool = True
+    include_rejected: bool = False
+
+
+@app.post(
+    "/jobs/{job_id}/resolve/push",
+    summary="Push job results into the user's currently open Resolve project",
+)
+def resolve_push(job_id: str, body: ResolvePushBody) -> Dict[str, Any]:
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != JobStatus.done:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Job is not done yet (status={job.status}).",
+        )
+    try:
+        import resolve_bridge
+        return resolve_bridge.push_job(
+            job,
+            mode=body.mode,
+            include_near_miss=body.include_near_miss,
+            include_rejected=body.include_rejected,
+        )
+    except RuntimeError as exc:
+        # Lazy bridge errors (Resolve not running, no project, scripting
+        # disabled) — surface verbatim, they're already user-facing.
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Resolve push failed for job %s: %s", job_id, exc)
+        raise HTTPException(status_code=500, detail=f"Resolve push failed: {exc}")
 
 
 # ─────────────────────────── Export — Resolve ────────────────────────────────
@@ -364,10 +967,19 @@ def export_fcpxml(job_id: str, body: FcpxmlExportRequest) -> Dict[str, Any]:
 
     try:
         written_path = export_to_fcpxml(job=job, output_path=body.output_path)
+        # Side-write an SRT subtitle file for any NLE
+        srt_path = ""
+        try:
+            from srt_export import export_srt
+            srt_target = str(Path(written_path).with_suffix(".srt"))
+            srt_path = export_srt(job=job, output_path=srt_target)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("SRT export failed (non-fatal): %s", exc)
         return {
             "success": True,
             "export_type": "fcpxml",
             "output_path": written_path,
+            "subtitle_path": srt_path or None,
             "clips_exported": len(approved),
         }
     except Exception as exc:  # noqa: BLE001
@@ -468,3 +1080,20 @@ def stream_clip(job_id: str, clip_id: str, request: Request):
         media_type=media_type,
         headers={"Accept-Ranges": "bytes"},
     )
+
+
+# ─────────────────────────── Frontend statics ───────────────────────────────
+# When the frontend has been built (Vite `npm run build` → frontend/dist), the
+# backend serves it at /. Lets the PyInstaller bundle ship a single port — no
+# Vite process needed in production. In dev mode (start.sh runs Vite on
+# 5173) frontend/dist may not exist; this mount is a no-op then.
+
+_FRONTEND_DIST = (Path(__file__).resolve().parent.parent / "frontend" / "dist")
+if _FRONTEND_DIST.is_dir() and (_FRONTEND_DIST / "index.html").exists():
+    from fastapi.staticfiles import StaticFiles
+    app.mount(
+        "/",
+        StaticFiles(directory=str(_FRONTEND_DIST), html=True),
+        name="frontend",
+    )
+    logger.info("Serving built frontend from %s", _FRONTEND_DIST)

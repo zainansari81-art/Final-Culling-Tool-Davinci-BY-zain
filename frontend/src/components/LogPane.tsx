@@ -7,9 +7,10 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 
 interface Props {
-  jobId: string
+  jobId?: string
   active: boolean
   className?: string
+  fetcher?: (since: number) => Promise<{ lines: string[]; total: number }>
 }
 
 const LEVEL_COLORS: Record<string, string> = {
@@ -19,7 +20,7 @@ const LEVEL_COLORS: Record<string, string> = {
   D: 'text-muted-foreground/70',
 }
 
-export default function LogPane({ jobId, active, className }: Props) {
+export default function LogPane({ jobId, active, className, fetcher }: Props) {
   const [lines, setLines] = useState<string[]>([])
   const [autoScroll, setAutoScroll] = useState(true)
   const sinceRef = useRef(0)
@@ -27,10 +28,12 @@ export default function LogPane({ jobId, active, className }: Props) {
 
   useEffect(() => {
     let cancelled = false
+    const fetchFn =
+      fetcher ?? ((since: number) => api.getLogs(jobId ?? '', since))
 
     const tick = async () => {
       try {
-        const data = await api.getLogs(jobId, sinceRef.current)
+        const data = await fetchFn(sinceRef.current)
         if (cancelled) return
         if (data.lines.length > 0) {
           sinceRef.current = data.total
@@ -48,7 +51,7 @@ export default function LogPane({ jobId, active, className }: Props) {
       cancelled = true
       clearInterval(t)
     }
-  }, [jobId, active])
+  }, [jobId, active, fetcher])
 
   useEffect(() => {
     if (!autoScroll) return

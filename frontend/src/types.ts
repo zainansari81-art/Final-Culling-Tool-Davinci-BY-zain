@@ -13,7 +13,26 @@ export interface ClipResult {
   duplicate_of: string | null
   suggested_segment: string
   approved: boolean | null
+  near_miss: boolean
   reject_reason: string | null
+  // AI-derived
+  ai_caption?: string | null
+  ai_rationale?: string | null
+  ai_moment?: string | null
+  ai_quality?: number | null
+  ai_subjects?: string[]
+  ai_in_sec?: number | null
+  ai_out_sec?: number | null
+  ai_skip?: boolean
+  ai_skip_reason?: string | null
+  transcript?: string | null
+  rank_in_group?: number | null
+  sequence_position?: number | null
+  dialogue_trimmed?: boolean
+  needs_stabilization: boolean
+  analysis_sec: number | null
+  ai_reasoning: string[]
+  word_count?: number
 }
 
 export interface AnalysisJob {
@@ -23,18 +42,25 @@ export interface AnalysisJob {
   progress: number
   clips: ClipResult[]
   created_at: string
+  started_at?: string | null
+  completed_at?: string | null
   error?: string | null
 }
 
 export interface CreateJobRequest {
   folder_path: string
   included_files?: string[]
+  enable_ai?: boolean
 }
 
 export interface UpdateClipRequest {
   approved?: boolean | null
+  near_miss?: boolean | null
   suggested_segment?: string
   reject_reason?: string | null
+  sequence_position?: number
+  ai_in_sec?: number
+  ai_out_sec?: number
 }
 
 export interface ExportRequest {

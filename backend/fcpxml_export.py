@@ -25,32 +25,43 @@ logger = logging.getLogger(__name__)
 # FCPXML rational timebase — 90000 ticks/s is universally safe
 TIMEBASE = 90000
 
-# Segment ordering for the primary storyline (wedding-day chronology)
+# Segment ordering for the primary storyline (wedding-day chronology).
+# Includes both new canonical names (from Vertex AI) and legacy regex labels.
 SEGMENT_ORDER = [
     "Bride Getting Ready",
+    "Groomsmen Getting Ready",
     "Groomsmen",
     "First Look",
     "Ceremony",
+    "Cocktail Hour",
     "Cocktail",
+    "Reception / First Dance",
     "First Dance",
     "Toasts",
+    "Drone / Aerial",
     "Drone",
+    "Ambiance / BTS",
     "Ambiance",
     "Backup",
 ]
 
-# Marker colour hints per segment (custom extension — FCP ignores unknown attrs)
+# Marker colour hints per segment (FCP ignores unknown attrs)
 SEGMENT_MARKER_COLORS: Dict[str, str] = {
-    "Groomsmen":            "blue",
-    "Bride Getting Ready":  "red",
-    "First Look":           "yellow",
-    "Ceremony":             "green",
-    "Cocktail":             "orange",
-    "First Dance":          "purple",
-    "Toasts":               "red",
-    "Drone":                "green",
-    "Ambiance":             "blue",
-    "Backup":               "white",
+    "Groomsmen Getting Ready": "blue",
+    "Groomsmen":               "blue",
+    "Bride Getting Ready":     "red",
+    "First Look":              "yellow",
+    "Ceremony":                "green",
+    "Cocktail Hour":           "orange",
+    "Cocktail":                "orange",
+    "Reception / First Dance": "purple",
+    "First Dance":             "purple",
+    "Toasts":                  "red",
+    "Drone / Aerial":          "green",
+    "Drone":                   "green",
+    "Ambiance / BTS":          "blue",
+    "Ambiance":                "blue",
+    "Backup":                  "white",
 }
 
 
@@ -66,13 +77,80 @@ def _safe_id(text: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]", "_", text)[:64]
 
 
+# Caption splitting (mirrors srt_export tunables)
+_WORDS_PER_LINE = 7
+_PAUSE_BREAK_SEC = 0.7
+_MIN_LINE_DUR = 0.8
+_MAX_LINE_DUR = 6.0
+
+
+def _build_clip_captions(words, in_sec: float, out_sec: float) -> List:
+    """Group word timestamps into (offset_sec_in_clip, dur_sec, text) tuples,
+    relative to the clip's trimmed in-point so they line up with the spine.
+    """
+    out: List = []
+    bucket = []
+
+    def flush():
+        if not bucket:
+            return
+        first, last = bucket[0], bucket[-1]
+        text = " ".join(w.word for w in bucket).strip()
+        if not text:
+            return
+        offset = max(0.0, first.start_sec - in_sec)
+        dur = last.end_sec - first.start_sec
+        if dur < _MIN_LINE_DUR:
+            dur = _MIN_LINE_DUR
+        if dur > _MAX_LINE_DUR:
+            dur = _MAX_LINE_DUR
+        out.append((offset, dur, text))
+
+    for w in words:
+        if w.end_sec <= in_sec or w.start_sec >= out_sec:
+            continue
+        if not bucket:
+            bucket.append(w)
+            continue
+        gap = w.start_sec - bucket[-1].end_sec
+        if gap >= _PAUSE_BREAK_SEC or len(bucket) >= _WORDS_PER_LINE:
+            flush()
+            bucket = [w]
+        else:
+            bucket.append(w)
+    flush()
+    return out
+
+
 def _approved_by_segment(job: AnalysisJob) -> Dict[str, List[ClipReview]]:
     groups: Dict[str, List[ClipReview]] = {}
     for clip in job.clips:
         if clip.approved:
             seg = clip.segment_label or "Backup"
             groups.setdefault(seg, []).append(clip)
+    # Within each segment, prefer AI-determined narrative order; clips
+    # without sequence_position go last in path-sorted order.
+    for seg, clips in groups.items():
+        clips.sort(key=lambda c: (
+            c.scores.sequence_position if c.scores.sequence_position is not None else 1_000_000,
+            c.path.lower(),
+        ))
     return groups
+
+
+def _trim_window(clip: ClipReview) -> tuple[float, float]:
+    """Return (in_sec, out_sec) honoring AI suggestion when present.
+
+    Falls back to the full clip if AI didn't run or values are out of bounds.
+    """
+    s = clip.scores
+    total = max(0.0, float(s.duration_sec or 0.0))
+    in_s = float(s.ai_in_sec) if s.ai_in_sec is not None else 0.0
+    out_s = float(s.ai_out_sec) if s.ai_out_sec is not None else total
+
+    in_s = max(0.0, min(in_s, total))
+    out_s = max(in_s + 0.1, min(out_s, total)) if total > 0 else 0.0
+    return in_s, out_s
 
 
 # ── FCPXML builder ────────────────────────────────────────────────────────────
@@ -180,7 +258,8 @@ def _build_fcpxml(job: AnalysisJob, project_name: str) -> str:
             continue
 
         seg = clip.segment_label or "Backup"
-        dur = clip.scores.duration_sec or 0.0
+        in_s, out_s = _trim_window(clip)
+        dur = max(0.04, out_s - in_s)  # at least one frame at 24fps
 
         clip_elem = ET.SubElement(
             spine, "clip",
@@ -190,12 +269,13 @@ def _build_fcpxml(job: AnalysisJob, project_name: str) -> str:
             start="0s",
             format="r0",
         )
+        # asset-clip 'start' = source-media in-point; outer 'duration' = trim length
         ET.SubElement(
             clip_elem, "asset-clip",
             ref=asset_id,
             offset="0s",
             duration=_ticks(dur),
-            start="0s",
+            start=_ticks(in_s),
             audioRole="dialogue",
         )
         # Segment marker (colour is a non-standard extension hint)
@@ -204,9 +284,45 @@ def _build_fcpxml(job: AnalysisJob, project_name: str) -> str:
             start="0s",
             duration="1/24s",
             value=seg,
-            note=f"Segment: {seg}",
+            note=f"Segment: {seg}" + (
+                f" · AI quality {clip.scores.ai_quality:.1f}/10"
+                if clip.scores.ai_quality is not None else ""
+            ),
         )
         marker.set("color", SEGMENT_MARKER_COLORS.get(seg, "white"))
+
+        # Caption echo as a marker so the editor sees the AI caption inline
+        caption_text = clip.scores.ai_caption or clip.scores.ai_moment
+        if caption_text:
+            note_marker = ET.SubElement(
+                clip_elem, "marker",
+                start=_ticks(min(0.5, dur / 2)),
+                duration="1/24s",
+                value=(clip.scores.ai_moment or "Caption")[:60],
+                note=caption_text[:200],
+            )
+            note_marker.set("color", "blue")
+
+        # Word-timed CEA-608 captions on lane -1 (subtitle track) when speech
+        # was transcribed for this clip. Lines are split on natural pauses /
+        # length cap (mirrors srt_export logic).
+        if clip.scores.words:
+            for cap in _build_clip_captions(
+                words=clip.scores.words, in_sec=in_s, out_sec=out_s,
+            ):
+                cap_offset_sec, cap_dur_sec, text = cap
+                cap_elem = ET.SubElement(
+                    clip_elem, "caption",
+                    lane="-1",
+                    offset=_ticks(cap_offset_sec),
+                    start="0s",
+                    duration=_ticks(cap_dur_sec),
+                    role="iTT?captionFormat=ITT.en-US",
+                )
+                cap_text = ET.SubElement(cap_elem, "text")
+                cap_text.set("placement", "bottom")
+                ts = ET.SubElement(cap_text, "text-style", ref="ts_cap")
+                ts.text = text
 
         current_offset += dur
 

@@ -1,27 +1,32 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
-  ArrowRight,
-  Clapperboard,
   Clock,
-  Film,
+  FolderOpen,
   Loader2,
-  Sparkles,
+  PenSquare,
+  Play,
+  Plus,
+  Search,
+  Settings as SettingsIcon,
 } from 'lucide-react'
-import { api } from '../api'
+import { api, type AiInfo } from '../api'
 import type { AnalysisJob } from '../types'
 import BackendError from '../components/BackendError'
 import FolderBrowser from '../components/FolderBrowser'
-import LogPane from '../components/LogPane'
-import { Step, Stepper, type StepState } from '../components/StepCard'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Progress } from '@/components/ui/progress'
-import { Separator } from '@/components/ui/separator'
+import LocalWarmupCard from '../components/LocalWarmupCard'
+import OnboardingWizard from '../components/OnboardingWizard'
+import Shell from '../components/Shell'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Badge } from '@/components/ui/badge'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-
-type WizardStep = 'pick' | 'analyzing' | 'review'
 
 const formatDate = (iso?: string) => {
   if (!iso) return ''
@@ -44,12 +49,23 @@ export default function HomePage() {
   const [backendDown, setBackendDown] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const [openStep, setOpenStep] = useState<WizardStep>('pick')
-
   const [folderPath, setFolderPath] = useState('')
   const [includedFiles, setIncludedFiles] = useState<string[] | null>(null)
   const [selectedCount, setSelectedCount] = useState(0)
   const [activeJob, setActiveJob] = useState<AnalysisJob | null>(null)
+  // AI is always on; kept as a const so existing API call shape stays.
+  const enableAi = true
+  const [aiInfo, setAiInfo] = useState<AiInfo | null>(null)
+  const [newSessionOpen, setNewSessionOpen] = useState(false)
+  // Folder picker is hidden in v1 — Session = Resolve Media Pool only.
+  // Kept the state shape so the legacy code paths still type-check; the
+  // toggle UI just isn't rendered.
+  const [sourceMode] = useState<'folder' | 'resolve'>('resolve')
+  const [resolveClips, setResolveClips] = useState<{ path: string; name: string }[]>([])
+  const [resolveProject, setResolveProject] = useState<string>('')
+  const [resolvePicked, setResolvePicked] = useState<Set<string>>(new Set())
+  const [resolveLoading, setResolveLoading] = useState(false)
+  const [resolveError, setResolveError] = useState('')
 
   const loadJobs = async () => {
     try {
@@ -65,9 +81,20 @@ export default function HomePage() {
 
   useEffect(() => {
     loadJobs()
+    api.aiInfo().then(setAiInfo).catch(() => setAiInfo(null))
   }, [])
 
-  // Poll the active job for progress
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
+        e.preventDefault()
+        setNewSessionOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   useEffect(() => {
     if (!activeJob) return
     if (activeJob.status === 'done' || activeJob.status === 'failed') return
@@ -76,28 +103,62 @@ export default function HomePage() {
         const fresh = await api.getJob(activeJob.id)
         setActiveJob(fresh)
         if (fresh.status === 'done') {
-          setOpenStep('review')
           loadJobs()
+          navigate(`/jobs/${fresh.id}`)
         }
       } catch {
-        // swallow, will retry
+        // retry
       }
     }
     const t = setInterval(tick, 1500)
     return () => clearInterval(t)
-  }, [activeJob])
+  }, [activeJob, navigate])
+
+  const loadResolveClips = async () => {
+    setResolveLoading(true)
+    setResolveError('')
+    try {
+      const r = await api.resolveMediaPool()
+      setResolveClips(r.clips)
+      setResolveProject(r.project_name)
+      setResolvePicked(new Set())
+    } catch (err: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const detail = (err as any)?.response?.data?.detail
+      setResolveError(String(detail ?? (err instanceof Error ? err.message : 'Failed to read Media Pool')))
+      setResolveClips([])
+    } finally {
+      setResolveLoading(false)
+    }
+  }
 
   const handleAnalyze = async () => {
-    if (!folderPath || selectedCount === 0) return
     setSubmitting(true)
     setError('')
     try {
-      const job = await api.createJob({
-        folder_path: folderPath,
-        included_files: includedFiles ?? undefined,
-      })
+      let job: AnalysisJob
+      if (sourceMode === 'resolve') {
+        const picks = Array.from(resolvePicked)
+        if (picks.length === 0) {
+          setError('Pick at least one clip from the Media Pool.')
+          setSubmitting(false)
+          return
+        }
+        job = await api.createJobFromPaths(picks, resolveProject || 'DaVinci Project')
+      } else {
+        if (!folderPath || selectedCount === 0) {
+          setSubmitting(false)
+          return
+        }
+        job = await api.createJob({
+          folder_path: folderPath,
+          included_files: includedFiles ?? undefined,
+          enable_ai: enableAi,
+        })
+      }
       setActiveJob(job)
-      setOpenStep('analyzing')
+      setNewSessionOpen(false)
+      navigate(`/jobs/${job.id}`)
     } catch (err: unknown) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const detail = (err as any)?.response?.data?.detail
@@ -109,322 +170,469 @@ export default function HomePage() {
     }
   }
 
-  const pickState: StepState = activeJob
-    ? 'done'
-    : selectedCount > 0
-      ? 'active'
-      : 'active'
+  const [sidebarQuery, setSidebarQuery] = useState('')
 
-  const analyzeState: StepState = !activeJob
-    ? 'pending'
-    : activeJob.status === 'done'
-      ? 'done'
-      : 'active'
-
-  const reviewState: StepState =
-    activeJob?.status === 'done' ? 'active' : 'pending'
-
-  const recentJobs = useMemo(() => jobs.slice(0, 5), [jobs])
+  const groupedJobs = useMemo(() => {
+    const q = sidebarQuery.trim().toLowerCase()
+    const filtered = jobs.filter((j) =>
+      q
+        ? (j.folder_path.split('/').pop() || j.folder_path)
+            .toLowerCase()
+            .includes(q)
+        : true,
+    )
+    const now = Date.now()
+    const day = 86400_000
+    const todayStart = new Date()
+    todayStart.setHours(0, 0, 0, 0)
+    const yStart = todayStart.getTime() - day
+    const weekStart = todayStart.getTime() - 7 * day
+    const groups: Record<string, AnalysisJob[]> = {
+      Today: [],
+      Yesterday: [],
+      'Previous 7 days': [],
+      Older: [],
+    }
+    for (const j of filtered) {
+      const t = new Date(j.created_at).getTime()
+      if (t >= todayStart.getTime()) groups.Today.push(j)
+      else if (t >= yStart) groups.Yesterday.push(j)
+      else if (t >= weekStart) groups['Previous 7 days'].push(j)
+      else groups.Older.push(j)
+      if (now - t < 0) groups.Today.push(j) // future-safe noop
+    }
+    return groups
+  }, [jobs, sidebarQuery])
 
   if (backendDown) {
     return (
-      <div className="min-h-svh bg-background p-6">
-        <BackendError />
-      </div>
+      <Shell hideSidebar>
+        <div className="p-6">
+          <BackendError />
+        </div>
+      </Shell>
     )
   }
 
-  return (
-    <div className="min-h-svh bg-background">
-      <header className="sticky top-0 z-20 border-b border-border/70 bg-background/85 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-foreground text-background">
-              <Clapperboard className="h-4 w-4" />
-            </div>
-            <div className="text-sm font-medium tracking-tight">
-              Wedding Footage Culler
-            </div>
-          </div>
-          <Badge variant="secondary" className="gap-1.5 font-normal">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success/70 opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
-            </span>
-            Local
-          </Badge>
+  // Sidebar: Claude-desktop style — new-session ghost btn, search, grouped recents, settings link
+  const sidebar = (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="px-2 pt-2">
+        <button
+          type="button"
+          onClick={() => setNewSessionOpen(true)}
+          className="flex w-full items-center gap-2 rounded-sm border border-border-strong bg-muted/40 px-2.5 py-1.5 text-left text-[12.5px] text-foreground transition-colors hover:border-primary/50 hover:bg-accent"
+        >
+          <PenSquare className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="flex-1">New session</span>
+          <kbd className="font-mono text-[10px] tabular-nums text-muted-foreground">
+            ⌘N
+          </kbd>
+        </button>
+      </div>
+
+      <div className="px-2 pt-2 pb-1">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={sidebarQuery}
+            onChange={(e) => setSidebarQuery(e.target.value)}
+            placeholder="Search sessions"
+            className="h-7 w-full rounded-sm border border-border bg-input pl-7 pr-2 text-[12px] outline-none transition-colors focus:border-primary/60"
+          />
         </div>
-      </header>
+      </div>
 
-      <main className="mx-auto max-w-5xl px-6 pb-20 pt-10">
-        <div className="grid gap-10 lg:grid-cols-[1fr,300px]">
-          <section>
-            <div className="mb-8">
-              <h1 className="text-2xl font-semibold tracking-tight">New analysis</h1>
-              <p className="mt-1.5 text-sm text-muted-foreground">
-                Pick a folder, run analysis, then review and export your selects.
-              </p>
-            </div>
-
-            <Stepper>
-              {/* Step 1: Pick footage */}
-              <Step
-                index={1}
-                state={pickState}
-                title="Choose footage"
-                subtitle={
-                  folderPath
-                    ? `${folderPath} · ${selectedCount} clip${selectedCount === 1 ? '' : 's'} selected`
-                    : 'Browse your external drive and pick a folder of clips.'
-                }
-                open={openStep === 'pick'}
-                onToggle={() =>
-                  setOpenStep(openStep === 'pick' ? 'analyzing' : 'pick')
-                }
-                collapsible={!activeJob}
-              >
-                <FolderBrowser
-                  onSelectionChange={(p, files, count) => {
-                    setFolderPath(p)
-                    setIncludedFiles(files)
-                    setSelectedCount(count)
-                  }}
-                />
-                <Separator />
-                <div className="flex items-center justify-between gap-3 px-4 py-3">
-                  <p className="text-xs text-muted-foreground">
-                    {selectedCount > 0
-                      ? `Ready to analyze ${selectedCount} clip${selectedCount === 1 ? '' : 's'}.`
-                      : 'Select at least one clip to continue.'}
-                  </p>
-                  {error && (
-                    <p className="text-xs text-destructive">{error}</p>
-                  )}
-                  <Button
-                    onClick={handleAnalyze}
-                    disabled={selectedCount === 0 || submitting}
-                  >
-                    {submitting ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Starting…
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="h-4 w-4" />
-                        Run analysis
-                      </>
-                    )}
-                  </Button>
+      <div className="min-h-0 flex-1 overflow-auto pb-1">
+        {loadingJobs && (
+          <div className="space-y-1.5 px-2 py-2">
+            <Skeleton className="h-7 w-full" />
+            <Skeleton className="h-7 w-full" />
+            <Skeleton className="h-7 w-full" />
+          </div>
+        )}
+        {!loadingJobs && jobs.length === 0 && (
+          <p className="px-3 py-3 text-[11.5px] text-muted-foreground/80">
+            No sessions yet.
+          </p>
+        )}
+        {!loadingJobs &&
+          (Object.entries(groupedJobs) as [string, AnalysisJob[]][]).map(
+            ([label, items]) =>
+              items.length === 0 ? null : (
+                <div key={label} className="mt-2">
+                  <div className="px-3 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
+                    {label}
+                  </div>
+                  <div className="flex flex-col">
+                    {items.map((j) => (
+                      <SidebarJobItem key={j.id} job={j} />
+                    ))}
+                  </div>
                 </div>
-              </Step>
+              ),
+          )}
+      </div>
 
-              {/* Step 2: Analyze */}
-              <Step
-                index={2}
-                state={analyzeState}
-                title="Analyze clips"
-                subtitle={
-                  !activeJob
-                    ? 'Shake, blur, exposure and duplicate detection.'
-                    : activeJob.status === 'done'
-                      ? 'Analysis complete.'
-                      : `Analyzing… ${Math.round(activeJob.progress)}%`
-                }
-                open={openStep === 'analyzing'}
-                onToggle={() =>
-                  setOpenStep(openStep === 'analyzing' ? 'pick' : 'analyzing')
-                }
-                collapsible={!!activeJob}
-              >
-                {activeJob && (
-                  <div className="space-y-5 px-5 py-5">
-                    <div>
-                      <div className="mb-2 flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">
-                          {activeJob.status === 'done'
-                            ? 'Done'
-                            : activeJob.status === 'failed'
-                              ? 'Failed'
-                              : 'Analyzing keyframes…'}
-                        </span>
-                        <span className="tabular-nums font-medium">
-                          {Math.round(activeJob.progress)}%
-                        </span>
-                      </div>
-                      <Progress value={activeJob.progress} />
-                    </div>
+      <div className="border-t border-border">
+        <Link
+          to="/settings"
+          className="flex items-center gap-2 px-3 py-2 text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <SettingsIcon className="h-3.5 w-3.5" />
+          Settings
+        </Link>
+      </div>
+    </div>
+  )
 
-                    <div className="grid grid-cols-3 gap-3">
-                      <Stat
-                        label="Clips"
-                        value={activeJob.clips.length || selectedCount}
-                      />
-                      <Stat
-                        label="Status"
-                        value={
-                          activeJob.status === 'done'
-                            ? 'Done'
-                            : activeJob.status === 'failed'
-                              ? 'Failed'
-                              : 'Running'
-                        }
-                      />
-                      <Stat label="Folder" value={folderPath.split('/').pop() || '—'} />
-                    </div>
+  return (
+    <Shell sidebar={sidebar} sidebarTitle="Sessions">
+      {aiInfo?.backend === 'cloud' && !aiInfo.has_key && (
+        <div className="border-b border-border bg-card px-4 py-3">
+          <OnboardingWizard
+            onDone={() => {
+              api.aiInfo().then(setAiInfo).catch(() => {})
+            }}
+          />
+        </div>
+      )}
 
-                    {activeJob.status === 'failed' && activeJob.error && (
-                      <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                        {activeJob.error}
-                      </p>
-                    )}
+      <div className="min-h-0 flex-1 overflow-auto">
+        {/* Hero — clean welcome with single CTA */}
+        <div className="border-b border-border bg-card/40">
+          <div className="mx-auto flex max-w-3xl flex-col items-start gap-3 px-5 py-7">
+            <h1 className="text-[18px] font-semibold tracking-tight">
+              Start a new session
+            </h1>
+            <p className="text-[12.5px] text-muted-foreground">
+              Pick a folder of clips. Cull scores them, finds duplicates,
+              and hands ranked selects to Resolve.
+            </p>
+            <button
+              className="cta-primary"
+              onClick={() => setNewSessionOpen(true)}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              New session
+            </button>
+          </div>
+        </div>
 
-                    <LogPane
-                      jobId={activeJob.id}
-                      active={
-                        activeJob.status === 'running' ||
-                        activeJob.status === 'queued'
-                      }
-                    />
-                  </div>
-                )}
-              </Step>
+        {aiInfo?.backend === 'local' && (
+          <div className="border-b border-border bg-card/40 px-5 py-3">
+            <LocalWarmupCard />
+          </div>
+        )}
 
-              {/* Step 3: Review & export */}
-              <Step
-                index={3}
-                state={reviewState}
-                title="Review & export"
-                subtitle={
-                  reviewState === 'active'
-                    ? 'Open the review to approve clips and export to Resolve or FCPXML.'
-                    : 'Approve clips and send selects to Resolve or FCPXML.'
-                }
-                open={openStep === 'review'}
-                onToggle={() =>
-                  setOpenStep(openStep === 'review' ? 'analyzing' : 'review')
-                }
-                collapsible={reviewState !== 'pending'}
-                isLast
-              >
-                {activeJob?.status === 'done' && (
-                  <div className="flex items-center justify-between px-5 py-5">
-                    <div className="text-sm text-muted-foreground">
-                      {activeJob.clips.length} clip
-                      {activeJob.clips.length === 1 ? '' : 's'} ready to review.
-                    </div>
-                    <Button onClick={() => navigate(`/jobs/${activeJob.id}`)}>
-                      Open review
-                      <ArrowRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                )}
-              </Step>
-            </Stepper>
-          </section>
+        {/* Recent jobs grid */}
+        <div className="mx-auto max-w-6xl px-5 py-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-[13px] font-semibold">Recent sessions</h2>
+            <span className="text-[11.5px] text-muted-foreground">
+              {jobs.length} total
+            </span>
+          </div>
 
-          <aside className="lg:sticky lg:top-24 lg:self-start">
-            <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-              Recent jobs
-            </h2>
-            <Separator className="mt-3 mb-3" />
-            <div className="space-y-2">
-              {loadingJobs && (
-                <>
-                  <Skeleton className="h-14 w-full" />
-                  <Skeleton className="h-14 w-full" />
-                  <Skeleton className="h-14 w-full" />
-                </>
-              )}
-              {!loadingJobs && recentJobs.length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  No jobs yet. Start one from the steps on the left.
-                </p>
-              )}
-              {recentJobs.map((j) => (
-                <JobRow key={j.id} job={j} />
+          {loadingJobs && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-20 w-full" />
+            </div>
+          )}
+
+          {!loadingJobs && jobs.length === 0 && (
+            <div className="flex h-40 items-center justify-center rounded-md border border-dashed border-border bg-card/40 text-[12.5px] text-muted-foreground">
+              No sessions yet. Start a new session to begin.
+            </div>
+          )}
+
+          {!loadingJobs && jobs.length > 0 && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {jobs.map((j) => (
+                <JobCard key={j.id} job={j} />
               ))}
             </div>
-          </aside>
+          )}
         </div>
-      </main>
-    </div>
-  )
-}
-
-function Stat({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2.5">
-      <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-        {label}
       </div>
-      <div className="mt-0.5 truncate text-sm font-medium">{value}</div>
-    </div>
+
+      {/* New session dialog */}
+      <Dialog
+        open={newSessionOpen}
+        onOpenChange={(open) => {
+          setNewSessionOpen(open)
+          if (open && resolveClips.length === 0 && !resolveLoading) {
+            loadResolveClips()
+          }
+        }}
+      >
+        <DialogContent
+          className="flex h-[78vh] w-[min(720px,94vw)] flex-col gap-0 overflow-hidden border border-border/40 bg-card p-0 shadow-2xl shadow-black/70 sm:max-w-[720px]"
+          showCloseButton
+        >
+          <DialogHeader className="border-b border-border/50 bg-panel-header px-4 py-3">
+            <DialogTitle className="text-[13.5px] font-semibold tracking-tight">
+              New session
+            </DialogTitle>
+            <DialogDescription className="text-[12px]">
+              Pick clips from the active Resolve project's Media Pool, then run analysis.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {sourceMode === 'folder' ? (
+              <FolderBrowser
+                onSelectionChange={(p, files, count) => {
+                  setFolderPath(p)
+                  setIncludedFiles(files)
+                  setSelectedCount(count)
+                }}
+              />
+            ) : (
+              <div className="flex h-full flex-col">
+                <div className="flex items-center justify-between gap-3 border-b border-border bg-panel-header px-4 py-2 text-[12px]">
+                  <div className="truncate text-muted-foreground">
+                    {resolveLoading
+                      ? 'Reading Media Pool…'
+                      : resolveError
+                        ? <span className="text-destructive">{resolveError}</span>
+                        : `${resolveProject || '(no project)'} · ${resolveClips.length} clip${resolveClips.length === 1 ? '' : 's'}`}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setResolvePicked(new Set(resolveClips.map((c) => c.path)))}
+                      disabled={resolveClips.length === 0}
+                      className="cta-ghost h-7 text-[11px]"
+                    >
+                      Select all
+                    </button>
+                    <button
+                      onClick={() => setResolvePicked(new Set())}
+                      disabled={resolvePicked.size === 0}
+                      className="cta-ghost h-7 text-[11px]"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      onClick={loadResolveClips}
+                      disabled={resolveLoading}
+                      className="cta-ghost h-7 text-[11px]"
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                </div>
+                <div className="min-h-0 flex-1 overflow-auto">
+                  {resolveClips.length === 0 && !resolveLoading && !resolveError && (
+                    <div className="p-6 text-center text-[12px] text-muted-foreground">
+                      No video clips in the active project's Media Pool.
+                    </div>
+                  )}
+                  <ul>
+                    {resolveClips.map((c) => {
+                      const checked = resolvePicked.has(c.path)
+                      return (
+                        <li
+                          key={c.path}
+                          className="flex cursor-pointer items-center gap-3 border-b border-border/40 px-4 py-2 hover:bg-accent/40"
+                          onClick={() => {
+                            const next = new Set(resolvePicked)
+                            if (checked) next.delete(c.path)
+                            else next.add(c.path)
+                            setResolvePicked(next)
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {}}
+                            className="h-3.5 w-3.5 accent-[var(--primary)]"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-[12.5px] font-medium">{c.name}</div>
+                            <div className="truncate font-mono text-[10.5px] text-muted-foreground">
+                              {c.path}
+                            </div>
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-border bg-card">
+            <div className="flex items-center justify-between gap-3 px-4 py-3">
+              <div className="text-[12px] text-muted-foreground">
+                {sourceMode === 'resolve' ? (
+                  resolvePicked.size > 0 ? (
+                    <>
+                      <span className="font-medium tabular-nums text-foreground">
+                        {resolvePicked.size}
+                      </span>{' '}
+                      Media Pool clip{resolvePicked.size === 1 ? '' : 's'} selected · AI on
+                    </>
+                  ) : (
+                    'Pick at least one Media Pool clip to continue.'
+                  )
+                ) : selectedCount > 0 ? (
+                  <>
+                    <span className="font-medium tabular-nums text-foreground">
+                      {selectedCount}
+                    </span>{' '}
+                    clip{selectedCount === 1 ? '' : 's'} selected · AI on
+                  </>
+                ) : (
+                  'Select at least one clip to continue.'
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setNewSessionOpen(false)}
+                  className="cta-ghost"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAnalyze}
+                  disabled={
+                    submitting ||
+                    (sourceMode === 'resolve'
+                      ? resolvePicked.size === 0
+                      : selectedCount === 0)
+                  }
+                  className="cta-primary"
+                >
+                  {submitting ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Starting…
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-3.5 w-3.5 fill-current" />
+                      Run analysis
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+            {error && (
+              <div className="border-t border-destructive/40 bg-destructive/10 px-4 py-2 text-[12px] text-destructive">
+                {error}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+    </Shell>
   )
 }
 
-function JobRow({ job }: { job: AnalysisJob }) {
+function SidebarJobItem({ job }: { job: AnalysisJob }) {
   const isActive = job.status === 'running' || job.status === 'queued'
-  const statusLabel =
-    job.status === 'done'
-      ? 'Ready'
-      : job.status === 'running'
-        ? 'Running'
-        : job.status === 'queued'
-          ? 'Queued'
-          : 'Failed'
-  const statusVariant =
-    job.status === 'done'
-      ? 'success'
-      : job.status === 'failed'
-        ? 'destructive'
-        : 'muted'
-
+  const name = job.folder_path.split('/').pop() || job.folder_path
   return (
     <Link
       to={`/jobs/${job.id}`}
-      className="block rounded-lg border border-border/70 bg-card/40 px-3 py-2.5 transition-colors hover:border-border hover:bg-card"
+      className="mx-1 flex items-center gap-2 rounded-sm px-2 py-1.5 text-[12.5px] transition-colors hover:bg-accent/60"
+      title={name}
     >
-      <div className="mb-1.5 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5">
-          <Film className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <span className="truncate text-xs font-medium">
-            {job.folder_path.split('/').pop() || job.folder_path}
-          </span>
-        </div>
-        <StatusDot variant={statusVariant} />
-      </div>
-      <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-        <span className="flex items-center gap-1">
-          <Clock className="h-3 w-3" />
-          {formatDate(job.created_at)}
-        </span>
-        <span>
-          {statusLabel}
-          {isActive && ` · ${Math.round(job.progress)}%`}
-        </span>
-      </div>
+      <span className="flex h-3 w-3 shrink-0 items-center justify-center">
+        {isActive ? (
+          <Loader2 className="h-3 w-3 animate-spin text-[var(--primary)]" />
+        ) : job.status === 'failed' ? (
+          <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+        ) : (
+          <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
+        )}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-foreground/90">
+        {name}
+      </span>
       {isActive && (
-        <Progress value={job.progress} className="mt-2 h-1" />
+        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+          {Math.round(job.progress)}%
+        </span>
       )}
     </Link>
   )
 }
 
-function StatusDot({
-  variant,
-}: {
-  variant: 'success' | 'destructive' | 'muted'
-}) {
+function JobCard({ job }: { job: AnalysisJob }) {
+  const isActive = job.status === 'running' || job.status === 'queued'
+  const elapsed = (() => {
+    if (!job.started_at) return null
+    const end = job.completed_at
+      ? new Date(job.completed_at).getTime()
+      : Date.now()
+    const start = new Date(job.started_at).getTime()
+    const sec = Math.max(0, (end - start) / 1000)
+    const m = Math.floor(sec / 60)
+    const s = sec - m * 60
+    return m > 0 ? `${m}m ${s.toFixed(0)}s` : `${s.toFixed(1)}s`
+  })()
+  const label =
+    job.status === 'done'
+      ? 'Ready'
+      : job.status === 'failed'
+        ? 'Failed'
+        : isActive
+          ? `${Math.round(job.progress)}%`
+          : 'Idle'
   return (
-    <span
-      aria-hidden
+    <Link
+      to={`/jobs/${job.id}`}
       className={cn(
-        'h-1.5 w-1.5 shrink-0 rounded-full',
-        variant === 'success' && 'bg-success',
-        variant === 'destructive' && 'bg-destructive',
-        variant === 'muted' && 'bg-muted-foreground/60',
+        'panel flex flex-col gap-2 p-3 transition-colors hover:border-primary/50 hover:bg-card',
       )}
-    />
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span
+            className="truncate text-[13px] font-medium"
+            title={job.folder_path}
+          >
+            {job.folder_path.split('/').pop() || job.folder_path}
+          </span>
+        </div>
+        <Badge
+          variant="secondary"
+          className={cn(
+            'rounded-sm px-1.5 py-0 text-[10.5px]',
+            job.status === 'done' && 'bg-success/15 text-[var(--success)]',
+            job.status === 'failed' && 'bg-destructive/15 text-destructive',
+            isActive && 'bg-primary/15 text-[var(--primary)]',
+          )}
+        >
+          {label}
+        </Badge>
+      </div>
+      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+        <span className="flex items-center gap-1">
+          <Clock className="h-3 w-3" />
+          {formatDate(job.created_at)}
+        </span>
+        {elapsed && <span className="tabular-nums">{elapsed}</span>}
+      </div>
+      {isActive && (
+        <div className="smooth-progress">
+          <i style={{ width: `${job.progress}%` }} />
+        </div>
+      )}
+      {job.status === 'done' && (
+        <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
+          <span>{job.clips?.length ?? 0} clips</span>
+          <span className="text-[var(--primary)]">Open →</span>
+        </div>
+      )}
+    </Link>
   )
 }
+

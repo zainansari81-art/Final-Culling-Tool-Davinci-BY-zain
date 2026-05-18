@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DaVinci Resolve Workflow Integration manifest.
+  Studio-only feature (free Resolve disables WI).
+
+  Install by copying this directory (manifest.xml + index.html) into:
+    macOS    ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Workflow Integration Plugins/CullingTool/
+    Windows  %APPDATA%\Blackmagic Design\DaVinci Resolve\Workflow Integration Plugins\CullingTool\
+    Linux    ~/.local/share/DaVinciResolveWorkflowIntegrationPlugins/CullingTool/
+
+  Then restart Resolve and open Workspace > Workflow Integrations > Wedding Culling Tool.
+-->
+<Manifest>
+  <Identity Id="com.zainansari.weddingculling" Version="1.0.0"/>
+  <Name>Wedding Culling Tool</Name>
+  <Description>AI cull and ranked timeline build for raw wedding footage.</Description>
+  <Vendor>Zain Ansari</Vendor>
+  <PluginType>WorkflowIntegration</PluginType>
+  <MainEntry>index.html</MainEntry>
+  <DefaultWindowSize>
+    <Width>980</Width>
+    <Height>720</Height>
+  </DefaultWindowSize>
+</Manifest>
